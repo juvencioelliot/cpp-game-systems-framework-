@@ -63,7 +63,8 @@ namespace GameCore::Core
                 return;
             }
 
-            for (const auto& listener : *listeners)
+            const auto listenersSnapshot = *listeners;
+            for (const auto& listener : listenersSnapshot)
             {
                 listener.callback(event);
             }
