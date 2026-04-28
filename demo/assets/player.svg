@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Player knight">
+  <rect width="96" height="96" rx="14" fill="#1f2937"/>
+  <circle cx="48" cy="30" r="14" fill="#f8d8a8"/>
+  <path d="M24 78c4-22 14-34 24-34s20 12 24 34z" fill="#2563eb"/>
+  <path d="M34 44h28l7 34H27z" fill="#1d4ed8"/>
+  <path d="M30 23h36l-8-12H38z" fill="#d1d5db"/>
+  <path d="M30 23h36v8H30z" fill="#9ca3af"/>
+  <path d="M63 44l19 16-7 8-16-20z" fill="#e5e7eb"/>
+  <path d="M71 56l12 12-5 5-12-12z" fill="#facc15"/>
+  <circle cx="43" cy="30" r="2" fill="#111827"/>
+  <circle cx="53" cy="30" r="2" fill="#111827"/>
+</svg>

@@ -1,0 +1,13 @@
+[Player]
+health.current=120
+health.max=120
+attack.damage=25
+position.x=0
+position.y=0
+
+[Enemy]
+health.current=90
+health.max=90
+attack.damage=15
+position.x=1
+position.y=0
