@@ -573,6 +573,30 @@ namespace
         assert(events.listenerCount<DamageEvent>() == 0);
     }
 
+    void testEventBusSupportsUnsubscribeDuringPublish()
+    {
+        using namespace GameCore;
+
+        Core::EventBus events;
+        int firstCallCount = 0;
+        int secondCallCount = 0;
+        Core::EventBus::ListenerID firstListenerID = 0;
+
+        firstListenerID = events.subscribe<DamageEvent>([&](const DamageEvent&) {
+            ++firstCallCount;
+            events.unsubscribe<DamageEvent>(firstListenerID);
+        });
+        events.subscribe<DamageEvent>([&](const DamageEvent&) {
+            ++secondCallCount;
+        });
+
+        events.publish(DamageEvent{1, 1});
+        events.publish(DamageEvent{1, 1});
+
+        assert(firstCallCount == 1);
+        assert(secondCallCount == 2);
+    }
+
     void testEventBusClearAndRejectsEmptyListeners()
     {
         using namespace GameCore;
@@ -1593,6 +1617,7 @@ int main()
     testSystemSchedulerCanMutateWorld();
     testEventBusPublishesTypedEvents();
     testEventBusUnsubscribesListeners();
+    testEventBusSupportsUnsubscribeDuringPublish();
     testEventBusClearAndRejectsEmptyListeners();
     testScheduledSystemsCanPublishWorldEvents();
     testStateMachineRunsLifecycleAndUpdateCallbacks();
