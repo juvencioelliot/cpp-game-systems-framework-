@@ -12,6 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(GameCoreCPP
     src/Core/Application.cpp
     src/Core/AssetLoaders.cpp
+    src/Core/Diagnostics.cpp
     src/Core/EntityManager.cpp
     src/Core/EntityPrefab.cpp
     src/Core/FileSystem.cpp

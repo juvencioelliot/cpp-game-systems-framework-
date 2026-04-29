@@ -66,6 +66,11 @@ namespace GameCore::Core
         return m_resources;
     }
 
+    Diagnostics& Application::diagnostics()
+    {
+        return m_diagnostics;
+    }
+
     const ResourceManager& Application::resources() const
     {
         return m_resources;

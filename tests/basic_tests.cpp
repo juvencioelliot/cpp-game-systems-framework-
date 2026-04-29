@@ -4,6 +4,7 @@
 #include "GameCore/Core/Application.h"
 #include "GameCore/Core/AssetLoaders.h"
 #include "GameCore/Core/ComponentStorage.h"
+#include "GameCore/Core/Diagnostics.h"
 #include "GameCore/Core/EventBus.h"
 #include "GameCore/Core/EntityManager.h"
 #include "GameCore/Core/EntityPrefab.h"
@@ -1600,6 +1601,29 @@ namespace
 
         std::filesystem::remove(path);
     }
+
+    void testDiagnosticsSupportsLevelsAndCustomSink()
+    {
+        using namespace GameCore;
+
+        Core::Diagnostics diagnostics;
+        std::vector<std::string> messages;
+        diagnostics.setSink([&messages](const Core::LogLevel level, const std::string_view message) {
+            messages.emplace_back(std::to_string(static_cast<int>(level)) + ":" + std::string(message));
+        });
+
+        diagnostics.debug("debug");
+        diagnostics.info("info");
+        diagnostics.warning("warning");
+        diagnostics.error("error");
+
+        assert(messages.size() == 4);
+        assert(messages[0] == "0:debug");
+        assert(messages[1] == "1:info");
+        assert(messages[2] == "2:warning");
+        assert(messages[3] == "3:error");
+    }
+
 }
 
 int main()
@@ -1658,5 +1682,6 @@ int main()
     testPrefabInstantiatorCreatesEntitiesWithComponents();
     testKeyValuePrefabLoaderReportsInvalidInput();
     testPrefabAssetLoaderLoadsAndReloadsDocuments();
+    testDiagnosticsSupportsLevelsAndCustomSink();
     return 0;
 }
