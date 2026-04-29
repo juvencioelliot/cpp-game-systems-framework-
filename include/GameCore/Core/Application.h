@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameCore/Core/ApplicationContext.h"
+#include "GameCore/Core/Diagnostics.h"
 #include "GameCore/Core/InputManager.h"
 #include "GameCore/Core/ResourceManager.h"
 #include "GameCore/Core/Scene.h"
@@ -26,6 +27,7 @@ namespace GameCore::Core
         const InputManager& input() const;
 
         ResourceManager& resources() override;
+        Diagnostics& diagnostics() override;
         const ResourceManager& resources() const;
 
         Scene* activeScene();
@@ -35,6 +37,7 @@ namespace GameCore::Core
         std::unique_ptr<Scene> m_activeScene;
         InputManager m_input;
         ResourceManager m_resources;
+        Diagnostics m_diagnostics;
         std::uint64_t m_frameIndex{0};
         bool m_running{false};
     };

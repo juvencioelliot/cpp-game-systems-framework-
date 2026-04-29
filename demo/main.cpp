@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -380,8 +379,10 @@ namespace
             output << "</ul></aside></section></main></body></html>";
             output.close();
 
-            std::cout << "GameCoreCPP Visual Demo generated:\n"
-                      << outputPath << '\n';
+            if (auto* app = application())
+            {
+                app->diagnostics().info("GameCoreCPP Visual Demo generated: " + outputPath);
+            }
         }
 
         static void writeHealthCard(std::ostream& output,
