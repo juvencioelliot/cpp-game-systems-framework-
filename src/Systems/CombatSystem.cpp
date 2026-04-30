@@ -5,31 +5,45 @@
 
 namespace GameCore::Systems
 {
-    std::string CombatSystem::attack(Core::EntityID attacker,
-                                     Core::EntityID target,
-                                     const AttackStorage& attacks,
-                                     HealthStorage& health)
+    CombatAttackResult CombatSystem::attackDetailed(Core::EntityID attacker,
+                                                    Core::EntityID target,
+                                                    const AttackStorage& attacks,
+                                                    HealthStorage& health)
     {
+        CombatAttackResult result;
+        result.attacker = attacker;
+        result.target = target;
+
         const auto* attackComponent = attacks.get(attacker);
         auto* targetHealth = health.get(target);
 
         if (attackComponent == nullptr)
         {
-            return "Entity " + std::to_string(attacker) + " cannot attack.";
+            result.message = "Entity " + std::to_string(attacker) + " cannot attack.";
+            return result;
         }
+        result.attackerCanAttack = true;
 
         if (targetHealth == nullptr)
         {
-            return "Entity " + std::to_string(target) + " has no health component.";
+            result.message = "Entity " + std::to_string(target) + " has no health component.";
+            return result;
         }
+        result.targetHadHealth = true;
+        result.targetHealth = targetHealth->currentHealth;
+        result.targetMaxHealth = targetHealth->maxHealth;
 
         if (!targetHealth->isAlive())
         {
-            return "Entity " + std::to_string(target) + " is already defeated.";
+            result.message = "Entity " + std::to_string(target) + " is already defeated.";
+            return result;
         }
 
         const int damage = std::max(0, attackComponent->damage);
         targetHealth->currentHealth = std::max(0, targetHealth->currentHealth - damage);
+        result.damage = damage;
+        result.targetHealth = targetHealth->currentHealth;
+        result.damageApplied = true;
 
         std::ostringstream message;
         message << "Entity " << attacker << " attacks Entity " << target
@@ -38,8 +52,18 @@ namespace GameCore::Systems
         if (!targetHealth->isAlive())
         {
             message << " Entity " << target << " is defeated.";
+            result.targetDefeated = true;
         }
 
-        return message.str();
+        result.message = message.str();
+        return result;
+    }
+
+    std::string CombatSystem::attack(Core::EntityID attacker,
+                                     Core::EntityID target,
+                                     const AttackStorage& attacks,
+                                     HealthStorage& health)
+    {
+        return attackDetailed(attacker, target, attacks, health).message;
     }
 }

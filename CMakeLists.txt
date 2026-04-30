@@ -9,6 +9,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(EXISTS "/opt/homebrew")
+    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+endif()
+
 add_library(GameCoreCPP
     src/Core/Application.cpp
     src/Core/AssetLoaders.cpp
@@ -21,9 +25,30 @@ add_library(GameCoreCPP
     src/Core/Scene.cpp
     src/Core/SceneManager.cpp
     src/Core/SystemScheduler.cpp
+    src/Systems/AttackIntentSystem.cpp
     src/Systems/CombatSystem.cpp
+    src/Systems/MovementSystem.cpp
     src/Systems/RenderSystem.cpp
 )
+
+find_package(SDL2 QUIET)
+if(SDL2_FOUND)
+    target_sources(GameCoreCPP
+        PRIVATE
+            src/Core/SdlInputBackend.cpp
+            src/Systems/SdlRenderBackend.cpp
+    )
+
+    target_compile_definitions(GameCoreCPP
+        PUBLIC
+            GAMECORE_HAS_SDL2=1
+    )
+
+    target_link_libraries(GameCoreCPP
+        PUBLIC
+            SDL2::SDL2
+    )
+endif()
 
 target_include_directories(GameCoreCPP
     PUBLIC
@@ -37,7 +62,6 @@ add_executable(GameCoreDemo
 target_compile_definitions(GameCoreDemo
     PRIVATE
         GAMECORE_DEMO_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/demo/assets"
-        GAMECORE_DEMO_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_link_libraries(GameCoreDemo
@@ -47,13 +71,18 @@ target_link_libraries(GameCoreDemo
 
 enable_testing()
 
-add_executable(GameCoreTests
-    tests/basic_tests.cpp
-)
+function(add_gamecore_test target source)
+    add_executable(${target}
+        ${source}
+    )
 
-target_link_libraries(GameCoreTests
-    PRIVATE
-        GameCoreCPP
-)
+    target_link_libraries(${target}
+        PRIVATE
+            GameCoreCPP
+    )
 
-add_test(NAME GameCoreBasicTests COMMAND GameCoreTests)
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+add_gamecore_test(GameCoreBasicTests tests/basic_tests.cpp)
+add_gamecore_test(GameCoreWorldTests tests/world_tests.cpp)

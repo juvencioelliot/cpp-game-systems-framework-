@@ -10,18 +10,42 @@
 
 namespace GameCore::Core
 {
+    enum class SystemPhase
+    {
+        Input,
+        Simulation,
+        PostSimulation,
+        Render,
+    };
+
+    struct SystemOrder
+    {
+        SystemPhase phase{SystemPhase::Simulation};
+        int priority{0};
+    };
+
     class SystemScheduler
     {
     public:
         template <typename System, typename... Args>
         System& addSystem(Args&&... args)
         {
+            return addSystem<System>(SystemOrder{}, std::forward<Args>(args)...);
+        }
+
+        template <typename System, typename... Args>
+        System& addSystem(SystemOrder order, Args&&... args)
+        {
             static_assert(std::is_base_of<ISystem, System>::value,
                           "SystemScheduler can only own ISystem implementations.");
 
             auto system = std::make_unique<System>(std::forward<Args>(args)...);
             auto& reference = *system;
-            m_systems.push_back(std::move(system));
+            m_systems.push_back(SystemEntry{
+                std::move(system),
+                order,
+                m_nextInsertionOrder++,
+            });
             return reference;
         }
 
@@ -31,6 +55,14 @@ namespace GameCore::Core
         [[nodiscard]] std::size_t systemCount() const;
 
     private:
-        std::vector<std::unique_ptr<ISystem>> m_systems;
+        struct SystemEntry
+        {
+            std::unique_ptr<ISystem> system;
+            SystemOrder order;
+            std::size_t insertionOrder{0};
+        };
+
+        std::vector<SystemEntry> m_systems;
+        std::size_t m_nextInsertionOrder{0};
     };
 }

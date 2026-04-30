@@ -2,7 +2,7 @@
 
 GameCoreCPP is a modular C++ game systems framework. It is not trying to clone Unity or Unreal feature-for-feature yet; it is building the kind of clean core those engines depend on: entity lifetime, component ownership, system-driven behavior, and a small but testable runtime layer.
 
-The current demo shows a player and an enemy fighting in the terminal through an engine-hosted scene, scheduled system, and event-driven log output.
+The current demo runs a playable player-versus-enemy combat scene through the engine runtime. It renders live frames through SDL2 when available, with a terminal renderer as fallback.
 
 ## Goals
 
@@ -14,7 +14,7 @@ The current demo shows a player and an enemy fighting in the terminal through an
 
 ## Quick Tutorial: Build and Run
 
-This project uses CMake and requires a C++17-capable compiler.
+This project uses CMake and requires a C++17-capable compiler. SDL2 is optional and enables the windowed demo backend.
 
 ### 1. Clone and enter the project
 
@@ -43,20 +43,26 @@ cmake --build build
 
 ### 4. Run the demo
 
-Start the terminal combat demo:
+Run the visual combat demo:
 
 ```bash
 ./build/GameCoreDemo
 ```
 
-The demo creates a player and enemy, assigns health, attack, and position components, then runs a simple combat loop.
+The demo creates a player and enemy from a prefab, reads SDL keyboard input, runs movement and attack systems, and redraws a small arena with health bars and combat logs.
+
+Controls in the SDL build:
+
+- `WASD` or arrow keys: move
+- `Space` or `Enter`: attack adjacent enemy
+- `Escape` or window close: exit
 
 ### 5. Run the tests
 
 After building, run the test suite with CTest:
 
 ```bash
-ctest --test-dir build
+ctest --test-dir build --output-on-failure
 ```
 
 ## Current Architecture
@@ -117,6 +123,7 @@ GameCoreCPP/
 - `Application` owns the active scene and drives deterministic frame updates.
 - `ApplicationContext` is the limited interface scenes use to request app-level services.
 - `AssetLoaders` provides file-backed resource loader helpers for built-in resource types.
+- `Diagnostics` provides level-based logging with configurable sinks.
 - `EntityPrefab` defines a format-neutral prefab data model and instantiation helpers.
 - `Entity.h` defines `EntityID`, the lightweight identifier used to represent game objects.
 - `EntityManager` creates, destroys, tracks, and recycles entity IDs.
@@ -147,7 +154,7 @@ Components are simple data structs:
 Systems contain behavior:
 
 - `CombatSystem` reads attack components and updates health components.
-- `RenderSystem` reads component state and prints a terminal view.
+- `RenderSystem` snapshots component state and sends frames to a rendering backend. The current backends are SDL2 and terminal.
 - Runtime systems can implement `ISystem` and be driven by `SystemScheduler`.
 
 ### State Machines
@@ -177,6 +184,8 @@ Current behavior:
 - Resources can be queried, required, unloaded, cleared, and reloaded.
 - Reloading replaces the cached resource for future lookups; existing handles remain valid references to the older resource.
 - `Application` owns a shared resource manager so resources can survive scene changes.
+- Resource metadata tracks ID, type name, source path, load count, reload count, and last reload error.
+- `ResourceManager::events()` publishes `ResourceLoadedEvent` and `ResourceReloadFailedEvent`.
 
 Built-in file-backed resource types:
 
@@ -200,9 +209,11 @@ Current prefab support:
 
 - `EntityPrefab`
 - `PrefabDocument`
+- `PrefabComponentRegistry`
 - `PrefabInstantiator::instantiate(world, prefab)`
 - `PrefabInstantiator::instantiateAll(world, document)`
 - `KeyValuePrefabLoader::loadFromText(text)`
+- `KeyValuePrefabLoader::loadFromText(text, registry)`
 - `KeyValuePrefabLoader::loadFromFile(path)`
 
 Current built-in prefab components:

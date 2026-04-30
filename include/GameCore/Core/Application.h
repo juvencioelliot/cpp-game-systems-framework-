@@ -11,6 +11,13 @@
 
 namespace GameCore::Core
 {
+    struct ApplicationRunOptions
+    {
+        float fixedDeltaSeconds{1.0F / 60.0F};
+        std::uint64_t maxFrames{0};
+        bool sleepToMaintainRate{false};
+    };
+
     class Application
         : public ApplicationContext
     {
@@ -18,6 +25,7 @@ namespace GameCore::Core
         void setScene(std::unique_ptr<Scene> scene);
 
         void runFrames(std::uint64_t frameCount, float deltaSeconds);
+        void run(const ApplicationRunOptions& options = {});
         void stop() override;
 
         [[nodiscard]] bool isRunning() const;

@@ -13,6 +13,7 @@ GameCoreCPP is a small C++ game framework foundation. It is not a full engine ye
 - resources and assets
 - prefabs
 - state machines
+- diagnostics
 
 ## 1. The Big Idea
 
@@ -42,6 +43,7 @@ The current runtime looks like this:
 Application
 ├── InputManager
 ├── ResourceManager
+├── Diagnostics
 └── Active Scene
     ├── World
     │   ├── EntityManager
@@ -58,6 +60,9 @@ The `Scene` owns gameplay state for a level, menu, battle, or other runtime unit
 The `World` owns entities, components, and events.
 
 The `SystemScheduler` runs systems in order every frame.
+Systems can use explicit phases and priorities when registration order is not enough.
+
+`RenderSystem` converts component state into render frames and sends them to an `IRenderBackend`. The current backends are SDL2 for a windowed arena and terminal rendering as a fallback; future backends can target sprites, 3D, or other platforms without changing gameplay systems.
 
 ## 3. Application
 

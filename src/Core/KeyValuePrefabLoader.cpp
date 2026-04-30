@@ -63,7 +63,8 @@ namespace GameCore::Core
         void applyProperty(EntityPrefab& prefab,
                            const std::string& key,
                            const std::string& value,
-                           int lineNumber)
+                           int lineNumber,
+                           const PrefabComponentRegistry* registry)
         {
             if (key == "name")
             {
@@ -126,65 +127,121 @@ namespace GameCore::Core
                 return;
             }
 
+            const auto prefixEnd = key.find('.');
+            if (prefixEnd != std::string::npos && registry != nullptr)
+            {
+                const std::string type = key.substr(0, prefixEnd);
+                const std::string property = key.substr(prefixEnd + 1);
+                if (registry->hasComponent(type))
+                {
+                    if (property.empty())
+                    {
+                        throw std::runtime_error("Prefab component property cannot be empty on line " +
+                                                 std::to_string(lineNumber) + ".");
+                    }
+
+                    auto component = std::find_if(
+                        prefab.runtimeComponents.begin(),
+                        prefab.runtimeComponents.end(),
+                        [&type](const RuntimePrefabComponent& runtimeComponent) {
+                            return runtimeComponent.type == type;
+                        });
+
+                    if (component == prefab.runtimeComponents.end())
+                    {
+                        RuntimePrefabComponent runtimeComponent;
+                        runtimeComponent.type = type;
+                        runtimeComponent.factory = registry->factoryFor(type);
+                        prefab.runtimeComponents.push_back(std::move(runtimeComponent));
+                        component = prefab.runtimeComponents.end() - 1;
+                    }
+
+                    component->properties[property] = value;
+                    return;
+                }
+            }
+
             throw std::runtime_error("Unknown prefab key '" + key +
                                      "' on line " + std::to_string(lineNumber) + ".");
+        }
+
+        PrefabDocument loadPrefabDocument(const std::string& text,
+                                          const PrefabComponentRegistry* registry)
+        {
+            PrefabDocument document;
+            std::istringstream stream(text);
+            std::string line;
+            int lineNumber = 0;
+
+            while (std::getline(stream, line))
+            {
+                ++lineNumber;
+
+                const std::string trimmedLine = trim(line);
+                if (trimmedLine.empty() || trimmedLine[0] == '#')
+                {
+                    continue;
+                }
+
+                if (trimmedLine.front() == '[' && trimmedLine.back() == ']')
+                {
+                    EntityPrefab prefab;
+                    prefab.name = trim(trimmedLine.substr(1, trimmedLine.size() - 2));
+                    if (prefab.name.empty())
+                    {
+                        throw std::runtime_error("Entity section name cannot be empty on line " +
+                                                 std::to_string(lineNumber) + ".");
+                    }
+
+                    document.entities.push_back(std::move(prefab));
+                    continue;
+                }
+
+                const auto separator = trimmedLine.find('=');
+                if (separator == std::string::npos)
+                {
+                    throw std::runtime_error("Expected key=value on line " +
+                                             std::to_string(lineNumber) + ".");
+                }
+
+                const std::string key = trim(trimmedLine.substr(0, separator));
+                const std::string value = trim(trimmedLine.substr(separator + 1));
+                if (key.empty())
+                {
+                    throw std::runtime_error("Prefab key cannot be empty on line " +
+                                             std::to_string(lineNumber) + ".");
+                }
+
+                applyProperty(requireCurrentEntity(document, lineNumber),
+                              key,
+                              value,
+                              lineNumber,
+                              registry);
+            }
+
+            return document;
         }
     }
 
     PrefabDocument KeyValuePrefabLoader::loadFromText(const std::string& text)
     {
-        PrefabDocument document;
-        std::istringstream stream(text);
-        std::string line;
-        int lineNumber = 0;
+        return loadPrefabDocument(text, nullptr);
+    }
 
-        while (std::getline(stream, line))
-        {
-            ++lineNumber;
-
-            const std::string trimmedLine = trim(line);
-            if (trimmedLine.empty() || trimmedLine[0] == '#')
-            {
-                continue;
-            }
-
-            if (trimmedLine.front() == '[' && trimmedLine.back() == ']')
-            {
-                EntityPrefab prefab;
-                prefab.name = trim(trimmedLine.substr(1, trimmedLine.size() - 2));
-                if (prefab.name.empty())
-                {
-                    throw std::runtime_error("Entity section name cannot be empty on line " +
-                                             std::to_string(lineNumber) + ".");
-                }
-
-                document.entities.push_back(std::move(prefab));
-                continue;
-            }
-
-            const auto separator = trimmedLine.find('=');
-            if (separator == std::string::npos)
-            {
-                throw std::runtime_error("Expected key=value on line " +
-                                         std::to_string(lineNumber) + ".");
-            }
-
-            const std::string key = trim(trimmedLine.substr(0, separator));
-            const std::string value = trim(trimmedLine.substr(separator + 1));
-            if (key.empty())
-            {
-                throw std::runtime_error("Prefab key cannot be empty on line " +
-                                         std::to_string(lineNumber) + ".");
-            }
-
-            applyProperty(requireCurrentEntity(document, lineNumber), key, value, lineNumber);
-        }
-
-        return document;
+    PrefabDocument KeyValuePrefabLoader::loadFromText(const std::string& text,
+                                                      const PrefabComponentRegistry& registry)
+    {
+        return loadPrefabDocument(text, &registry);
     }
 
     PrefabDocument KeyValuePrefabLoader::loadFromFile(const std::string& path)
     {
         return loadFromText(FileSystem::readTextFile(path));
+    }
+
+    PrefabDocument KeyValuePrefabLoader::loadFromFile(const std::string& path,
+                                                      const PrefabComponentRegistry& registry)
+    {
+        return loadFromText(FileSystem::readTextFile(path), registry);
     }
 }

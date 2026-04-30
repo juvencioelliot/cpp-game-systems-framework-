@@ -16,7 +16,7 @@ namespace GameCore::Core
                 FileSystem::readTextFile(path),
                 path,
             });
-        });
+        }, path);
     }
 
     ResourceHandle<BinaryResource> AssetLoaders::loadBinary(ResourceManager& resources,
@@ -28,7 +28,7 @@ namespace GameCore::Core
                 FileSystem::readBinaryFile(path),
                 path,
             });
-        });
+        }, path);
     }
 
     ResourceHandle<PrefabDocument> AssetLoaders::loadKeyValuePrefab(ResourceManager& resources,
@@ -38,6 +38,6 @@ namespace GameCore::Core
         return resources.load<PrefabDocument>(id, [path]() {
             return std::make_shared<PrefabDocument>(
                 KeyValuePrefabLoader::loadFromFile(path));
-        });
+        }, path);
     }
 }

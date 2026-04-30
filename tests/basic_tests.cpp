@@ -1,5 +1,7 @@
 #include "GameCore/Components/AttackComponent.h"
+#include "GameCore/Components/AttackIntentComponent.h"
 #include "GameCore/Components/HealthComponent.h"
+#include "GameCore/Components/MoveIntentComponent.h"
 #include "GameCore/Components/PositionComponent.h"
 #include "GameCore/Core/Application.h"
 #include "GameCore/Core/AssetLoaders.h"
@@ -17,7 +19,10 @@
 #include "GameCore/Core/StateMachine.h"
 #include "GameCore/Core/SystemScheduler.h"
 #include "GameCore/Core/World.h"
+#include "GameCore/Systems/AttackIntentSystem.h"
+#include "GameCore/Systems/CombatEvents.h"
 #include "GameCore/Systems/CombatSystem.h"
+#include "GameCore/Systems/MovementSystem.h"
 #include "GameCore/Systems/RenderSystem.h"
 
 #include <cassert>
@@ -46,6 +51,11 @@ namespace
     };
 
     struct NumberResource
+    {
+        int value{0};
+    };
+
+    struct SpeedComponent
     {
         int value{0};
     };
@@ -349,6 +359,34 @@ namespace
         assert(targetHealth->currentHealth == 20);
     }
 
+    void testCombatDetailedResultReportsStructuredDamage()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID attacker = world.createEntity();
+        const Core::EntityID target = world.createEntity();
+
+        world.addComponent(attacker, Components::AttackComponent{30});
+        world.addComponent(target, Components::HealthComponent{20, 20});
+
+        Systems::CombatSystem combat;
+        const auto result = combat.attackDetailed(attacker,
+                                                  target,
+                                                  world.storage<Components::AttackComponent>(),
+                                                  world.storage<Components::HealthComponent>());
+
+        assert(result.attacker == attacker);
+        assert(result.target == target);
+        assert(result.damage == 30);
+        assert(result.targetHealth == 0);
+        assert(result.targetMaxHealth == 20);
+        assert(result.attackerCanAttack);
+        assert(result.targetHadHealth);
+        assert(result.damageApplied);
+        assert(result.targetDefeated);
+    }
+
     void testCombatHandlesMissingComponentsDefeatAndNegativeDamage()
     {
         using namespace GameCore;
@@ -410,25 +448,21 @@ namespace
         world.addComponent(entity, Components::PositionComponent{3, 4});
         world.addComponent(namelessDataEntity, Components::PositionComponent{-1, 2});
 
-        Systems::RenderSystem render;
         std::ostringstream output;
+        Systems::RenderSystem render(
+            std::make_unique<Systems::TerminalRenderBackend>(output, false),
+            std::vector<Systems::RenderEntityLabel>{
+                Systems::RenderEntityLabel{entity, "Hero", 'H'},
+                Systems::RenderEntityLabel{namelessDataEntity, "Marker", 'M'},
+            });
 
-        render.renderEntity(output,
-                            entity,
-                            "Hero",
-                            world.storage<Components::HealthComponent>(),
-                            world.storage<Components::PositionComponent>());
-        render.renderEntity(output,
-                            namelessDataEntity,
-                            "Marker",
-                            world.storage<Components::HealthComponent>(),
-                            world.storage<Components::PositionComponent>());
-        render.renderSeparator(output);
+        render.update(world, Core::FrameContext{0.016F, 9});
 
-        assert(output.str() ==
-               "Hero [Entity 1] Position(3, 4) Health 8/10\n"
-               "Marker [Entity 2] Position(-1, 2)\n"
-               "----------------------------------------\n");
+        const std::string renderedFrame = output.str();
+        assert(renderedFrame.find("GameCoreCPP Runtime Renderer | frame 9") != std::string::npos);
+        assert(renderedFrame.find("H Hero HP 8/10") != std::string::npos);
+        assert(renderedFrame.find("M Marker") != std::string::npos);
+        assert(!render.shouldClose());
     }
 
     void testWorldRemovesComponentsWhenEntityIsDestroyed()
@@ -492,6 +526,55 @@ namespace
         assert(!world.hasComponent<Components::AttackComponent>(recycled));
     }
 
+    void testWorldEachVisitsEntitiesWithRequestedComponents()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID complete = world.createEntity();
+        const Core::EntityID missingAttack = world.createEntity();
+        const Core::EntityID destroyed = world.createEntity();
+
+        world.addComponent(complete, Components::HealthComponent{10, 10});
+        world.addComponent(complete, Components::AttackComponent{3});
+        world.addComponent(missingAttack, Components::HealthComponent{20, 20});
+        world.addComponent(destroyed, Components::HealthComponent{30, 30});
+        world.addComponent(destroyed, Components::AttackComponent{7});
+        world.destroyEntity(destroyed);
+
+        std::vector<Core::EntityID> visited;
+        world.each<Components::HealthComponent, Components::AttackComponent>(
+            [&visited](Core::EntityID entity,
+                       Components::HealthComponent& health,
+                       const Components::AttackComponent& attack) {
+                visited.push_back(entity);
+                health.currentHealth -= attack.damage;
+            });
+
+        assert((visited == std::vector<Core::EntityID>{complete}));
+        assert(world.getComponent<Components::HealthComponent>(complete)->currentHealth == 7);
+        assert(world.getComponent<Components::HealthComponent>(missingAttack)->currentHealth == 20);
+        assert(world.getComponent<Components::HealthComponent>(destroyed) == nullptr);
+    }
+
+    void testWorldEachSupportsConstIteration()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID entity = world.createEntity();
+        world.addComponent(entity, Components::PositionComponent{4, 5});
+
+        const Core::World& constWorld = world;
+        int total = 0;
+        constWorld.each<Components::PositionComponent>(
+            [&total](Core::EntityID, const Components::PositionComponent& position) {
+                total = position.x + position.y;
+            });
+
+        assert(total == 9);
+    }
+
     void testSystemSchedulerRunsSystemsInOrder()
     {
         using namespace GameCore;
@@ -510,6 +593,40 @@ namespace
         assert((updateOrder == std::vector<int>{1, 2}));
         assert(first.lastDeltaSeconds() == 0.25F);
         assert(second.lastFrameIndex() == 7);
+    }
+
+    void testSystemSchedulerOrdersByPhasePriorityAndInsertion()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        Core::SystemScheduler scheduler;
+        std::vector<int> updateOrder;
+
+        scheduler.addSystem<RecordingSystem>(
+            Core::SystemOrder{Core::SystemPhase::Render, 0},
+            5,
+            updateOrder);
+        scheduler.addSystem<RecordingSystem>(
+            Core::SystemOrder{Core::SystemPhase::Simulation, 10},
+            4,
+            updateOrder);
+        scheduler.addSystem<RecordingSystem>(
+            Core::SystemOrder{Core::SystemPhase::Input, 0},
+            1,
+            updateOrder);
+        scheduler.addSystem<RecordingSystem>(
+            Core::SystemOrder{Core::SystemPhase::Simulation, -10},
+            2,
+            updateOrder);
+        scheduler.addSystem<RecordingSystem>(
+            Core::SystemOrder{Core::SystemPhase::Simulation, -10},
+            3,
+            updateOrder);
+
+        scheduler.update(world, Core::FrameContext{});
+
+        assert((updateOrder == std::vector<int>{1, 2, 3, 4, 5}));
     }
 
     void testSystemSchedulerCanMutateWorld()
@@ -531,6 +648,70 @@ namespace
 
         scheduler.clear();
         assert(scheduler.systemCount() == 0);
+    }
+
+    void testMovementSystemAppliesAndClearsMoveIntent()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID entity = world.createEntity();
+        world.addComponent(entity, Components::PositionComponent{2, 2});
+        world.addComponent(entity, Components::MoveIntentComponent{4, -5});
+
+        Systems::MovementSystem movement(0, 0, 5, 5);
+        movement.update(world, Core::FrameContext{});
+
+        const auto* position = world.getComponent<Components::PositionComponent>(entity);
+        const auto* moveIntent = world.getComponent<Components::MoveIntentComponent>(entity);
+        assert(position != nullptr);
+        assert(moveIntent != nullptr);
+        assert(position->x == 5);
+        assert(position->y == 0);
+        assert(moveIntent->dx == 0);
+        assert(moveIntent->dy == 0);
+    }
+
+    void testAttackIntentSystemPublishesEventsAndDestroysDefeatedTarget()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID attacker = world.createEntity();
+        const Core::EntityID target = world.createEntity();
+        world.addComponent(attacker, Components::AttackComponent{30});
+        world.addComponent(attacker, Components::AttackIntentComponent{target});
+        world.addComponent(target, Components::HealthComponent{20, 20});
+
+        int damageEvents = 0;
+        int defeatEvents = 0;
+        int messageEvents = 0;
+        world.events().subscribe<Systems::DamageAppliedEvent>(
+            [&damageEvents](const Systems::DamageAppliedEvent& event) {
+                ++damageEvents;
+                assert(event.damage == 30);
+                assert(event.remainingHealth == 0);
+            });
+        world.events().subscribe<Systems::EntityDefeatedEvent>(
+            [&defeatEvents, target](const Systems::EntityDefeatedEvent& event) {
+                ++defeatEvents;
+                assert(event.entity == target);
+            });
+        world.events().subscribe<Systems::CombatMessageEvent>(
+            [&messageEvents](const Systems::CombatMessageEvent& event) {
+                ++messageEvents;
+                assert(!event.message.empty());
+            });
+
+        Systems::AttackIntentSystem attacks;
+        attacks.update(world, Core::FrameContext{});
+
+        assert(damageEvents == 1);
+        assert(defeatEvents == 1);
+        assert(messageEvents == 1);
+        assert(!world.isAlive(target));
+        assert(world.getComponent<Components::AttackIntentComponent>(attacker)->target ==
+               Core::InvalidEntity);
     }
 
     void testEventBusPublishesTypedEvents()
@@ -876,6 +1057,48 @@ namespace
         assert(sceneView->lastFrameIndex() == 0);
     }
 
+    void testApplicationRunUsesOptionsAndMaxFrames()
+    {
+        using namespace GameCore;
+
+        Core::Application application;
+        auto scene = std::make_unique<LifecycleScene>();
+        auto* sceneView = scene.get();
+
+        application.setScene(std::move(scene));
+        application.run(Core::ApplicationRunOptions{
+            0.5F,
+            2,
+            false,
+        });
+
+        assert(!application.isRunning());
+        assert(application.frameIndex() == 2);
+        assert(sceneView->initializeCount() == 1);
+        assert(sceneView->updateCount() == 2);
+    }
+
+    void testApplicationRunCanBeStoppedByScene()
+    {
+        using namespace GameCore;
+
+        Core::Application application;
+        auto scene = std::make_unique<StoppingScene>(application);
+        auto* sceneView = scene.get();
+
+        application.setScene(std::move(scene));
+        application.run(Core::ApplicationRunOptions{
+            1.0F,
+            10,
+            false,
+        });
+
+        assert(!application.isRunning());
+        assert(application.frameIndex() == 1);
+        assert(sceneView->updateCount() == 1);
+        assert(sceneView->lastFrameIndex() == 0);
+    }
+
     void testApplicationShutsDownPreviousSceneWhenReplacing()
     {
         using namespace GameCore;
@@ -1170,6 +1393,44 @@ namespace
         assert(oldHandle.get() != newHandle.get());
     }
 
+    void testResourceManagerTracksMetadataAndPublishesEvents()
+    {
+        using namespace GameCore;
+
+        Core::ResourceManager resources;
+        int loadedEvents = 0;
+        bool sawReload = false;
+        resources.events().subscribe<Core::ResourceLoadedEvent>(
+            [&loadedEvents, &sawReload](const Core::ResourceLoadedEvent& event) {
+                ++loadedEvents;
+                sawReload = sawReload || event.reloaded;
+            });
+
+        int version = 0;
+        resources.load<TextResource>(
+            "text/versioned",
+            [&version]() {
+                ++version;
+                return std::make_shared<TextResource>(TextResource{
+                    "version " + std::to_string(version),
+                });
+            },
+            "memory://versioned");
+
+        assert(resources.reload<TextResource>("text/versioned"));
+
+        const auto metadata = resources.metadata<TextResource>("text/versioned");
+        assert(metadata.has_value());
+        assert(metadata->id == "text/versioned");
+        assert(metadata->sourcePath == "memory://versioned");
+        assert(metadata->loadCount == 2);
+        assert(metadata->reloadCount == 1);
+        assert(metadata->lastReloadSucceeded);
+        assert(metadata->lastError.empty());
+        assert(loadedEvents == 2);
+        assert(sawReload);
+    }
+
     void testResourceManagerRejectsInvalidLoads()
     {
         using namespace GameCore;
@@ -1271,6 +1532,11 @@ namespace
         assert(threw);
         assert(handle.get() == afterFailure.get());
         assert(afterFailure->text == "stable");
+
+        const auto metadata = resources.metadata<TextResource>("config/reload-failure");
+        assert(metadata.has_value());
+        assert(!metadata->lastReloadSucceeded);
+        assert(metadata->lastError == "reload failed");
     }
 
     void testApplicationResourcesSurviveSceneChanges()
@@ -1521,6 +1787,37 @@ namespace
         assert(world.getComponent<Components::PositionComponent>(entities[1])->y == 6);
     }
 
+    void testPrefabRegistryInstantiatesCustomComponents()
+    {
+        using namespace GameCore;
+
+        Core::PrefabComponentRegistry registry;
+        registry.registerComponent("speed",
+                                   [](Core::World& world,
+                                      Core::EntityID entity,
+                                      const Core::PrefabPropertyMap& properties) {
+                                       world.addComponent(entity, SpeedComponent{
+                                                                    std::stoi(properties.at("value")),
+                                                                });
+                                   });
+
+        const auto document = Core::KeyValuePrefabLoader::loadFromText(
+            "[Runner]\n"
+            "speed.value=12\n",
+            registry);
+
+        assert(document.entities.size() == 1);
+        assert(document.entities[0].runtimeComponents.size() == 1);
+        assert(document.entities[0].runtimeComponents[0].type == "speed");
+        assert(document.entities[0].runtimeComponents[0].properties.at("value") == "12");
+
+        Core::World world;
+        const auto entities = Core::PrefabInstantiator::instantiateAll(world, document);
+
+        assert(entities.size() == 1);
+        assert(world.getComponent<SpeedComponent>(entities[0])->value == 12);
+    }
+
     void testKeyValuePrefabLoaderReportsInvalidInput()
     {
         using namespace GameCore;
@@ -1624,6 +1921,36 @@ namespace
         assert(messages[3] == "3:error");
     }
 
+    void testDiagnosticsSupportsFilteringAndMultipleSinks()
+    {
+        using namespace GameCore;
+
+        Core::Diagnostics diagnostics;
+        diagnostics.clearSinks();
+        diagnostics.setMinimumLevel(Core::LogLevel::Warning);
+
+        int firstSinkCount = 0;
+        int secondSinkCount = 0;
+        const auto firstSink = diagnostics.addSink(
+            [&firstSinkCount](Core::LogLevel, std::string_view) {
+                ++firstSinkCount;
+            });
+        diagnostics.addSink(
+            [&secondSinkCount](Core::LogLevel, std::string_view) {
+                ++secondSinkCount;
+            });
+
+        diagnostics.info("filtered");
+        diagnostics.warning("visible");
+        diagnostics.removeSink(firstSink);
+        diagnostics.error("visible");
+
+        assert(diagnostics.minimumLevel() == Core::LogLevel::Warning);
+        assert(diagnostics.sinkCount() == 1);
+        assert(firstSinkCount == 1);
+        assert(secondSinkCount == 2);
+    }
+
 }
 
 int main()
@@ -1632,13 +1959,19 @@ int main()
     testEntityManagerIgnoresInvalidAndDuplicateDestroy();
     testComponentStorageReplacesRemovesAndExposesMutableData();
     testCombatAppliesDamage();
+    testCombatDetailedResultReportsStructuredDamage();
     testCombatHandlesMissingComponentsDefeatAndNegativeDamage();
     testRenderSystemIncludesAvailableComponentsOnly();
     testWorldRemovesComponentsWhenEntityIsDestroyed();
     testWorldRejectsComponentsForDeadEntities();
     testWorldRecycledEntityStartsWithoutOldComponents();
+    testWorldEachVisitsEntitiesWithRequestedComponents();
+    testWorldEachSupportsConstIteration();
     testSystemSchedulerRunsSystemsInOrder();
+    testSystemSchedulerOrdersByPhasePriorityAndInsertion();
     testSystemSchedulerCanMutateWorld();
+    testMovementSystemAppliesAndClearsMoveIntent();
+    testAttackIntentSystemPublishesEventsAndDestroysDefeatedTarget();
     testEventBusPublishesTypedEvents();
     testEventBusUnsubscribesListeners();
     testEventBusSupportsUnsubscribeDuringPublish();
@@ -1654,6 +1987,8 @@ int main()
     testApplicationRunsActiveSceneForRequestedFrames();
     testApplicationRunWithoutSceneDoesNothing();
     testApplicationStopEndsFrameLoop();
+    testApplicationRunUsesOptionsAndMaxFrames();
+    testApplicationRunCanBeStoppedByScene();
     testApplicationShutsDownPreviousSceneWhenReplacing();
     testApplicationCanClearActiveScene();
     testSceneCanAccessApplicationContext();
@@ -1667,6 +2002,7 @@ int main()
     testResourceManagerKeepsResourceTypesSeparate();
     testResourceManagerUnloadsAndClearsResources();
     testResourceManagerReloadsUsingStoredLoader();
+    testResourceManagerTracksMetadataAndPublishesEvents();
     testResourceManagerRejectsInvalidLoads();
     testResourceManagerRequireMissingAndReloadMissing();
     testResourceManagerReloadFailureKeepsExistingResource();
@@ -1680,8 +2016,10 @@ int main()
     testAssetLoaderMissingFileDoesNotCacheResource();
     testKeyValuePrefabLoaderParsesMultipleEntities();
     testPrefabInstantiatorCreatesEntitiesWithComponents();
+    testPrefabRegistryInstantiatesCustomComponents();
     testKeyValuePrefabLoaderReportsInvalidInput();
     testPrefabAssetLoaderLoadsAndReloadsDocuments();
     testDiagnosticsSupportsLevelsAndCustomSink();
+    testDiagnosticsSupportsFilteringAndMultipleSinks();
     return 0;
 }

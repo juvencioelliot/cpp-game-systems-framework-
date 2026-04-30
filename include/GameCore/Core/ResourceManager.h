@@ -1,8 +1,11 @@
 #pragma once
 
+#include "GameCore/Core/EventBus.h"
+
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
@@ -12,6 +15,29 @@
 
 namespace GameCore::Core
 {
+    struct ResourceMetadata
+    {
+        std::string id;
+        std::string typeName;
+        std::string sourcePath;
+        std::size_t loadCount{0};
+        std::size_t reloadCount{0};
+        bool lastReloadSucceeded{true};
+        std::string lastError;
+    };
+
+    struct ResourceLoadedEvent
+    {
+        ResourceMetadata metadata;
+        bool reloaded{false};
+    };
+
+    struct ResourceReloadFailedEvent
+    {
+        ResourceMetadata metadata;
+        std::string error;
+    };
+
     template <typename Resource>
     class ResourceHandle
     {
@@ -73,6 +99,14 @@ namespace GameCore::Core
         template <typename Resource>
         ResourceHandle<Resource> load(const std::string& id, Loader<Resource> loader)
         {
+            return load<Resource>(id, std::move(loader), "");
+        }
+
+        template <typename Resource>
+        ResourceHandle<Resource> load(const std::string& id,
+                                      Loader<Resource> loader,
+                                      std::string sourcePath)
+        {
             validateID(id);
             if (!loader)
             {
@@ -92,10 +126,21 @@ namespace GameCore::Core
                 throw std::runtime_error("Resource loader returned null.");
             }
 
+            ResourceMetadata metadata;
+            metadata.id = id;
+            metadata.typeName = typeid(Resource).name();
+            metadata.sourcePath = std::move(sourcePath);
+            metadata.loadCount = 1;
+
             resourceStorage.resources.emplace(id, ResourceRecord<Resource>{
                                                       resource,
                                                       std::move(loader),
+                                                      metadata,
                                                   });
+            m_events.publish(ResourceLoadedEvent{
+                metadata,
+                false,
+            });
 
             return ResourceHandle<Resource>(id, std::move(resource));
         }
@@ -159,13 +204,35 @@ namespace GameCore::Core
                 return false;
             }
 
-            auto resource = it->second.loader();
-            if (resource == nullptr)
+            std::shared_ptr<Resource> resource;
+            try
             {
-                throw std::runtime_error("Resource loader returned null during reload.");
+                resource = it->second.loader();
+                if (resource == nullptr)
+                {
+                    throw std::runtime_error("Resource loader returned null during reload.");
+                }
+            }
+            catch (const std::exception& exception)
+            {
+                it->second.metadata.lastReloadSucceeded = false;
+                it->second.metadata.lastError = exception.what();
+                m_events.publish(ResourceReloadFailedEvent{
+                    it->second.metadata,
+                    exception.what(),
+                });
+                throw;
             }
 
             it->second.resource = std::move(resource);
+            ++it->second.metadata.loadCount;
+            ++it->second.metadata.reloadCount;
+            it->second.metadata.lastReloadSucceeded = true;
+            it->second.metadata.lastError.clear();
+            m_events.publish(ResourceLoadedEvent{
+                it->second.metadata,
+                true,
+            });
             return true;
         }
 
@@ -206,6 +273,34 @@ namespace GameCore::Core
             return m_resourceStorage.size();
         }
 
+        template <typename Resource>
+        [[nodiscard]] std::optional<ResourceMetadata> metadata(const std::string& id) const
+        {
+            const auto* resourceStorage = findStorage<Resource>();
+            if (resourceStorage == nullptr)
+            {
+                return std::nullopt;
+            }
+
+            const auto it = resourceStorage->resources.find(id);
+            if (it == resourceStorage->resources.end())
+            {
+                return std::nullopt;
+            }
+
+            return it->second.metadata;
+        }
+
+        EventBus& events()
+        {
+            return m_events;
+        }
+
+        const EventBus& events() const
+        {
+            return m_events;
+        }
+
     private:
         class IResourceStorage
         {
@@ -218,6 +313,7 @@ namespace GameCore::Core
         {
             std::shared_ptr<Resource> resource;
             Loader<Resource> loader;
+            ResourceMetadata metadata;
         };
 
         template <typename Resource>
@@ -279,5 +375,6 @@ namespace GameCore::Core
         }
 
         std::unordered_map<std::type_index, std::unique_ptr<IResourceStorage>> m_resourceStorage;
+        EventBus m_events;
     };
 }

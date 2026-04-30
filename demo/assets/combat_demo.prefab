@@ -9,5 +9,5 @@ position.y=0
 health.current=90
 health.max=90
 attack.damage=15
-position.x=1
-position.y=0
+position.x=8
+position.y=3

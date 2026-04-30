@@ -11,7 +11,9 @@ ctest --test-dir build --output-on-failure
 ./build/GameCoreDemo
 ```
 
-The demo runs a terminal combat encounter through the engine runtime.
+The demo runs a playable combat encounter through the engine runtime and renders live frames through SDL2 when available. If SDL2 is not found, it falls back to terminal rendering.
+
+SDL controls are `WASD`/arrow keys to move, `Space`/`Enter` to attack, and `Escape` or window close to exit.
 
 ## Runtime Shape
 
@@ -44,6 +46,16 @@ scenes.registerScene("game", [] {
 
 scenes.changeScene(application, "game");
 application.runFrames(60, 1.0F / 60.0F);
+```
+
+Use `runFrames` for deterministic tests and tools. Use `run` for a runtime loop:
+
+```cpp
+application.run(GameCore::Core::ApplicationRunOptions{
+    1.0F / 60.0F,
+    0,
+    true,
+});
 ```
 
 A scene derives from `GameCore::Core::Scene`:
@@ -109,18 +121,22 @@ public:
     void update(GameCore::Core::World& world,
                 const GameCore::Core::FrameContext& context) override
     {
-        auto& positions = world.storage<GameCore::Components::PositionComponent>();
-        for (auto& entry : positions.all())
-        {
-            entry.second.x += 1;
-        }
+        world.each<GameCore::Components::PositionComponent>(
+            [](GameCore::Core::EntityID, GameCore::Components::PositionComponent& position) {
+                position.x += 1;
+            });
     }
 };
 
 systems().addSystem<MovementSystem>();
 ```
 
-Systems run in registration order every scene update.
+Systems run in registration order by default. They can also be ordered by phase and priority:
+
+```cpp
+systems().addSystem<MovementSystem>(
+    GameCore::Core::SystemOrder{GameCore::Core::SystemPhase::Simulation, 10});
+```
 
 ## Events
 
@@ -192,6 +208,25 @@ auto binary = GameCore::Core::AssetLoaders::loadBinary(
 
 Reloading replaces the cached resource for future lookups. Existing handles remain valid because they hold `std::shared_ptr`.
 
+Resource metadata and reload events are available:
+
+```cpp
+auto metadata = application.resources().metadata<MyData>("data/player");
+application.resources().events().subscribe<GameCore::Core::ResourceLoadedEvent>(
+    [](const GameCore::Core::ResourceLoadedEvent& event) {
+        // Inspect event.metadata and event.reloaded.
+    });
+```
+
+## Diagnostics
+
+`Diagnostics` supports level filtering and configurable sinks:
+
+```cpp
+application.diagnostics().setMinimumLevel(GameCore::Core::LogLevel::Warning);
+application.diagnostics().warning("Missing optional asset");
+```
+
 ## Prefabs
 
 `EntityPrefab` is the format-neutral in-memory model. `KeyValuePrefabLoader` is only the first concrete loader. JSON or YAML can later produce the same `PrefabDocument`.
@@ -230,6 +265,7 @@ Current prefab component support:
 - `HealthComponent`
 - `AttackComponent`
 - `PositionComponent`
+- Custom registered components through `PrefabComponentRegistry`
 
 ## State Machines
 
@@ -267,7 +303,7 @@ machine.update(world(), context);
 4. Instantiates player and enemy into the scene `World`.
 5. Adds `CombatRoundSystem`.
 6. Publishes combat log events.
-7. Renders combat state.
+7. Renders the arena every frame through `RenderSystem`.
 8. Stops the application when combat ends.
 
 ## Recommended Extension Order

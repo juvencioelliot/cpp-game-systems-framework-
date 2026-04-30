@@ -10,6 +10,10 @@ namespace GameCore::Core
     {
     public:
         static PrefabDocument loadFromText(const std::string& text);
+        static PrefabDocument loadFromText(const std::string& text,
+                                           const PrefabComponentRegistry& registry);
         static PrefabDocument loadFromFile(const std::string& path);
+        static PrefabDocument loadFromFile(const std::string& path,
+                                           const PrefabComponentRegistry& registry);
     };
 }

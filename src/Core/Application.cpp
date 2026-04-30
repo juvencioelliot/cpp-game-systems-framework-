@@ -1,5 +1,8 @@
 #include "GameCore/Core/Application.h"
 
+#include <chrono>
+#include <thread>
+
 namespace GameCore::Core
 {
     void Application::setScene(std::unique_ptr<Scene> scene)
@@ -31,6 +34,39 @@ namespace GameCore::Core
             m_activeScene->update(FrameContext{deltaSeconds, m_frameIndex});
             ++m_frameIndex;
             m_input.beginFrame();
+        }
+
+        m_running = false;
+    }
+
+    void Application::run(const ApplicationRunOptions& options)
+    {
+        if (m_activeScene == nullptr)
+        {
+            return;
+        }
+
+        m_running = true;
+        std::uint64_t framesRun = 0;
+
+        while (m_running && (options.maxFrames == 0 || framesRun < options.maxFrames))
+        {
+            const auto frameStart = std::chrono::steady_clock::now();
+
+            m_activeScene->update(FrameContext{options.fixedDeltaSeconds, m_frameIndex});
+            ++m_frameIndex;
+            ++framesRun;
+            m_input.beginFrame();
+
+            if (options.sleepToMaintainRate && options.fixedDeltaSeconds > 0.0F)
+            {
+                const auto targetFrameDuration = std::chrono::duration<float>(options.fixedDeltaSeconds);
+                const auto elapsed = std::chrono::steady_clock::now() - frameStart;
+                if (elapsed < targetFrameDuration)
+                {
+                    std::this_thread::sleep_for(targetFrameDuration - elapsed);
+                }
+            }
         }
 
         m_running = false;

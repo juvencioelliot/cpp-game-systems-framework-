@@ -110,7 +110,83 @@ namespace GameCore::Core
             return static_cast<ComponentStorage<Component>&>(*it->second);
         }
 
+        template <typename FirstComponent, typename... Components, typename Callback>
+        void each(Callback callback)
+        {
+            auto* firstStorage = findStorage<FirstComponent>();
+            if (firstStorage == nullptr)
+            {
+                return;
+            }
+
+            for (auto& entry : firstStorage->all())
+            {
+                const EntityID entity = entry.first;
+                if (!isAlive(entity))
+                {
+                    continue;
+                }
+
+                if constexpr (sizeof...(Components) == 0)
+                {
+                    callback(entity, entry.second);
+                }
+                else
+                {
+                    callIfHasComponents<Components...>(entity, entry.second, callback);
+                }
+            }
+        }
+
+        template <typename FirstComponent, typename... Components, typename Callback>
+        void each(Callback callback) const
+        {
+            const auto* firstStorage = findStorage<FirstComponent>();
+            if (firstStorage == nullptr)
+            {
+                return;
+            }
+
+            for (const auto& entry : firstStorage->all())
+            {
+                const EntityID entity = entry.first;
+                if (!isAlive(entity))
+                {
+                    continue;
+                }
+
+                if constexpr (sizeof...(Components) == 0)
+                {
+                    callback(entity, entry.second);
+                }
+                else
+                {
+                    callIfHasComponents<Components...>(entity, entry.second, callback);
+                }
+            }
+        }
+
     private:
+        template <typename... Components, typename FirstComponent, typename Callback>
+        void callIfHasComponents(EntityID entity, FirstComponent& firstComponent, Callback& callback)
+        {
+            if (((getComponent<Components>(entity) != nullptr) && ...))
+            {
+                callback(entity, firstComponent, *getComponent<Components>(entity)...);
+            }
+        }
+
+        template <typename... Components, typename FirstComponent, typename Callback>
+        void callIfHasComponents(EntityID entity,
+                                 const FirstComponent& firstComponent,
+                                 Callback& callback) const
+        {
+            if (((getComponent<Components>(entity) != nullptr) && ...))
+            {
+                callback(entity, firstComponent, *getComponent<Components>(entity)...);
+            }
+        }
+
         template <typename Component>
         [[nodiscard]] ComponentStorage<Component>* findStorage()
         {
