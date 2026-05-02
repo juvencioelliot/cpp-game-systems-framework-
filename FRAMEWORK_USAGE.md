@@ -15,6 +15,14 @@ The demo runs a playable combat encounter through the engine runtime and renders
 
 SDL controls are `WASD`/arrow keys to move, `Space`/`Enter` to attack, and `Escape` or window close to exit.
 
+Optional benchmark build:
+
+```bash
+cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=TRUE -DGAMECORE_BUILD_BENCHMARKS=ON
+cmake --build build-perf --target GameCoreRuntimeBenchmark
+./build-perf/GameCoreRuntimeBenchmark
+```
+
 ## Runtime Shape
 
 ```text
@@ -69,9 +77,19 @@ protected:
         // Create entities, load resources, register systems.
     }
 
+    void onBeforeSystems(const GameCore::Core::FrameContext& context) override
+    {
+        // Write input intent or scene commands before systems consume them.
+    }
+
     void onUpdate(const GameCore::Core::FrameContext& context) override
     {
-        // Scene-level work after scheduled systems run.
+        // Compatibility hook called by the default onAfterSystems implementation.
+    }
+
+    void onAfterSystems(const GameCore::Core::FrameContext& context) override
+    {
+        // Scene-level work after scheduled systems and deferred destruction.
     }
 
     void onShutdown() override
@@ -92,6 +110,15 @@ if (auto* app = application())
 }
 ```
 
+Frame order inside `Scene::update(...)` is:
+
+```text
+onBeforeSystems
+SystemScheduler::update
+World::flushDeferredDestruction
+onAfterSystems
+```
+
 ## Entities And Components
 
 Entities are IDs. Components are plain data.
@@ -99,9 +126,11 @@ Entities are IDs. Components are plain data.
 ```cpp
 auto player = world().createEntity();
 
-world().addComponent(player, GameCore::Components::HealthComponent{120, 120});
-world().addComponent(player, GameCore::Components::AttackComponent{25});
 world().addComponent(player, GameCore::Components::PositionComponent{0, 0});
+world().addComponent(player, GameCore::Components::MoveIntentComponent{});
+world().addComponent(player, GameCore::Components::NameComponent{"Player"});
+world().addComponent(player, GameCore::Components::RenderableComponent{'P'});
+world().addComponent(player, GameCore::Components::ProgressComponent{120, 120});
 ```
 
 When an entity is destroyed through `World`, its components are removed too:
@@ -109,6 +138,26 @@ When an entity is destroyed through `World`, its components are removed too:
 ```cpp
 world().destroyEntity(player);
 ```
+
+Systems that are iterating over component data can queue destruction for the scene boundary:
+
+```cpp
+world().deferDestroyEntity(player);
+```
+
+The active `Scene` flushes deferred destruction after scheduled systems finish for the frame.
+
+Current built-in generic components:
+
+- `PositionComponent`
+- `MoveIntentComponent`
+- `NameComponent`
+- `RenderableComponent`
+- `ProgressComponent`
+- `TransformComponent`
+- `WorldTransformComponent`
+
+Game-specific components, such as combat health or attack data, should live in the game/demo layer.
 
 ## Systems
 
@@ -138,6 +187,12 @@ systems().addSystem<MovementSystem>(
     GameCore::Core::SystemOrder{GameCore::Core::SystemPhase::Simulation, 10});
 ```
 
+Built-in systems currently include:
+
+- `MovementSystem`
+- `TransformSystem`
+- `RenderSystem`
+
 ## Events
 
 Use `EventBus` for decoupled communication.
@@ -159,14 +214,14 @@ world().events().unsubscribe<DamageEvent>(listener);
 
 ## Input
 
-`InputManager` stores action state. It does not read keyboard/controller devices yet. A future backend should translate raw input into named actions.
+`InputManager` stores action state. SDL keyboard/window events can feed it through `SdlInputBackend` when SDL2 is available. Future controller, terminal, scripted, or test input backends should translate raw input into the same named action contract.
 
 ```cpp
-application.input().setActionDown("Attack", true);
+application.input().setActionDown("PrimaryAction", true);
 
-if (application.input().wasPressed("Attack"))
+if (application.input().wasPressed("PrimaryAction"))
 {
-    // Trigger attack once.
+    // Trigger the primary action once.
 }
 
 if (application.input().isHeld("MoveUp"))
@@ -174,7 +229,7 @@ if (application.input().isHeld("MoveUp"))
     // Continue moving.
 }
 
-if (application.input().wasReleased("Attack"))
+if (application.input().wasReleased("PrimaryAction"))
 {
     // Handle release.
 }
@@ -235,16 +290,10 @@ Example prefab file:
 
 ```text
 [Player]
-health.current=120
-health.max=120
-attack.damage=25
 position.x=0
 position.y=0
 
 [Enemy]
-health.current=90
-health.max=90
-attack.damage=15
 position.x=1
 position.y=0
 ```
@@ -262,10 +311,19 @@ auto entities = GameCore::Core::PrefabInstantiator::instantiateAll(world(), *pre
 
 Current prefab component support:
 
-- `HealthComponent`
-- `AttackComponent`
 - `PositionComponent`
 - Custom registered components through `PrefabComponentRegistry`
+
+Use `PrefabComponentRegistry` for game-owned data:
+
+```cpp
+GameCore::Core::PrefabComponentRegistry registry;
+registry.registerComponent("health", [](GameCore::Core::World& world,
+                                        GameCore::Core::EntityID entity,
+                                        const GameCore::Core::PrefabPropertyMap& properties) {
+    // Add game-specific components here.
+});
+```
 
 ## State Machines
 
@@ -301,15 +359,17 @@ machine.update(world(), context);
 2. Registers `CombatDemoScene` in `SceneManager`.
 3. Loads `demo/assets/combat_demo.prefab`.
 4. Instantiates player and enemy into the scene `World`.
-5. Adds `CombatRoundSystem`.
+5. Adds movement, demo combat intent, and render systems.
 6. Publishes combat log events.
-7. Renders the arena every frame through `RenderSystem`.
+7. Renders generic render/progress component state every frame through `RenderSystem`.
 8. Stops the application when combat ends.
 
 ## Recommended Extension Order
 
-1. Add real input backends that feed `InputManager`.
-2. Add scene description loading.
-3. Add serialization for saving/loading world state.
-4. Add movement and gameplay systems.
-5. Add rendering/audio/physics backends when the data/runtime contracts are stable.
+1. Add additional input backends, especially controller, terminal, scripted, and test backends.
+2. Add the runtime time/fixed-step layer with pause/manual stepping.
+3. Add deferred component add/remove commands.
+4. Add scene description loading.
+5. Add serialization for saving/loading world state.
+6. Add camera/sprite rendering on top of draw commands.
+7. Add rendering/audio/physics backends when the data/runtime contracts are stable.

@@ -15,6 +15,8 @@ The goal is not to build a full game engine, but to create a small, clean, and e
 
 A small live combat demo runs on top of the framework to prove that the runtime pieces work together. The demo currently renders through SDL2 when available, with terminal rendering as a fallback.
 
+The latest coding session is summarized in `CODING_SESSION_CHANGES.md`.
+
 ---
 
 ## 2. Main Goal
@@ -59,32 +61,43 @@ This is not meant to compete with Unreal Engine or Unity. It is a learning and p
 - ECS query helpers through `World::each<T...>()`.
 - Typed `EventBus` with safe publish iteration against listener mutation.
 - `SystemScheduler` with explicit phases and priorities.
+- Scene frame sequencing with before-systems and after-systems hooks.
 - `Application::runFrames(...)` for deterministic tests and `Application::run(...)` for runtime loops.
 - Scene lifecycle management through `Scene` and `SceneManager`.
 - Backend-agnostic `InputManager` action state tracking.
 - `ResourceManager` with typed caching, reload support, metadata, and load/reload events.
 - File-backed text, binary, and key/value prefab asset loaders.
-- Format-neutral prefabs with built-in component fields and `PrefabComponentRegistry` for custom component construction.
+- Format-neutral prefabs with built-in position fields and `PrefabComponentRegistry` for custom component construction.
 - `Diagnostics` with log levels, filtering, multiple sinks, and configurable output.
 - `RenderSystem` with an `IRenderBackend` boundary.
+- Backend-neutral render draw commands through `DrawFrame`.
 - `SdlRenderBackend` for a native SDL2 window when SDL2 is available.
 - `TerminalRenderBackend` as a dependency-free fallback.
 - `SdlInputBackend` maps SDL keyboard/window events into `InputManager` actions.
-- Intent-driven gameplay components: `MoveIntentComponent` and `AttackIntentComponent`.
-- `MovementSystem` and `AttackIntentSystem`.
-- Structured combat events: `CombatMessageEvent`, `DamageAppliedEvent`, and `EntityDefeatedEvent`.
+- Generic movement intent through `MoveIntentComponent`.
+- Generic progress display data through `ProgressComponent`.
+- Generic naming/rendering data through `NameComponent` and `RenderableComponent`.
+- Local/world transform data through `TransformComponent` and `WorldTransformComponent`.
+- `MovementSystem`.
+- `TransformSystem`.
+- Generation-aware entity IDs that reject stale recycled handles.
+- Generation wraparound protection inside the encoded entity handle range.
+- Deferred entity destruction flushed after scheduled systems.
+- Deferred destruction request deduplication.
+- Combat-specific health, attack, attack intent, and combat events moved into the demo gameplay layer.
 - Playable combat demo that loads prefab data, accepts input, runs scheduled systems, publishes events, and renders live frames.
+- Optional runtime benchmark target through `GAMECORE_BUILD_BENCHMARKS`.
 - CTest coverage for core systems, including a first split-out `GameCoreWorldTests` executable.
 
 ### Left To Do
 
-- Terminal/controller input backends beyond SDL keyboard/window events.
+- Stronger fixed-step time model with accumulation, pause state, and deterministic test hooks.
+- Broader deferred mutation command support beyond entity destruction.
+- Richer render components and draw-command model for sprites, text, cameras, and future 3D paths.
+- Render-frame builder optimization; the current benchmark identifies draw-frame construction as the main hotspot.
 - Richer AI and gameplay rules beyond the first chase-and-attack prototype.
-- Transform foundation with local/world transform data.
-- Deferred entity destruction for safer iteration during simulation.
-- Renderer draw-command model for sprites, text, layers, cameras, and future 3D paths.
-- Stronger time model with total time, fixed step accumulation, pause state, and fixed-frame counters.
-- More complete test split by subsystem.
+- Terminal/controller input backends beyond SDL keyboard/window events.
+- More complete test split by subsystem and stronger coverage around lifecycle, timing, scheduler order, and ECS safety.
 - Scene description assets so scenes can become more data-defined.
 
 ---
@@ -103,7 +116,7 @@ Examples:
 - Projectile
 - Item
 
-Entities are currently integer IDs. A future generation-based handle can make stale references safer.
+Entities are generation-aware integer handles. The encoded generation lets the engine reject stale IDs after an entity slot is destroyed and recycled.
 
 ### World
 
@@ -116,6 +129,7 @@ Responsibilities:
 - Add, remove, query, and fetch components
 - Iterate matching component sets through `each<T...>()`
 - Remove all components for an entity when that entity is destroyed
+- Queue entity destruction safely through deferred destruction
 - Provide systems with the component storages they need
 - Provide access to runtime events
 
@@ -127,18 +141,19 @@ Components are plain data objects. They should not own behavior or know which sy
 
 Current components:
 
-- `HealthComponent`
-- `AttackComponent`
 - `PositionComponent`
+- `MoveIntentComponent`
+- `ProgressComponent`
+- `NameComponent`
+- `RenderableComponent`
+- `TransformComponent`
+- `WorldTransformComponent`
 
 Next likely components:
 
-- `TransformComponent`
 - `VelocityComponent`
-- `MoveIntentComponent`
-- `AttackIntentComponent`
-- `TeamComponent`
-- `TargetComponent`
+- `SpriteComponent`
+- `CameraComponent`
 
 ### Systems
 
@@ -146,8 +161,9 @@ Systems contain behavior and operate on component data. They should stay narrow 
 
 Current systems:
 
-- `CombatSystem`
 - `RenderSystem`
+- `MovementSystem`
+- `TransformSystem`
 
 Runtime systems that need to run every frame can implement `ISystem`. `SystemScheduler` owns those systems and updates them using `FrameContext`, explicit phases, priorities, and deterministic insertion-order ties.
 
@@ -157,6 +173,8 @@ Systems can be ordered by `SystemPhase` and integer priority. Equal phase/priori
 
 - Delta time in seconds
 - Frame index
+- Total elapsed time in seconds
+- Fixed-frame index
 
 This gives the project a clear place to add fixed updates, total time, pause state, and profiling later.
 
@@ -172,7 +190,7 @@ Examples of future events:
 - Input action pressed
 - Resource loaded
 
-Resource load/reload events already exist. Combat events are still string-first and should be structured next.
+Resource load/reload events already exist. Combat events are now demo gameplay events rather than core engine events, which keeps the engine event bus generic.
 
 ### State Machines
 
@@ -237,9 +255,7 @@ Responsibilities:
 - Advance input frame state deterministically
 - Clear all known actions
 
-The engine does not yet read keyboard, controller, terminal, or platform events directly. Those backends can later translate raw input into action names.
-
-Because SDL2 is now present as a rendering backend, an SDL input adapter is the most direct next input bridge.
+SDL2 keyboard and window events are currently mapped into actions through `SdlInputBackend`. Controller, terminal, scripted, or test input backends can be added later by translating raw input into the same action names.
 
 ### Scene Management
 
@@ -318,14 +334,13 @@ This gives the engine a real file-backed asset path without committing yet to im
 Responsibilities:
 
 - Store entity prefab data in memory
-- Represent optional built-in components
+- Represent optional built-in position data
+- Preserve custom component data through registered factories
 - Instantiate one prefab into a `World`
 - Instantiate a full prefab document into a `World`
 
 Current prefab component support:
 
-- `HealthComponent`
-- `AttackComponent`
 - `PositionComponent`
 - Custom component prefixes through `PrefabComponentRegistry`
 
@@ -335,12 +350,11 @@ Example:
 
 ```text
 [Player]
-health.current=120
-health.max=120
-attack.damage=25
 position.x=0
 position.y=0
 ```
+
+Demo gameplay registers custom `health.*` and `attack.*` prefab prefixes through `PrefabComponentRegistry`. This keeps those concepts out of the engine core while preserving data-driven sample gameplay.
 
 The engine runtime should depend on `EntityPrefab` and `PrefabDocument`, not on the key/value parser. This keeps the path open for future `JsonPrefabLoader` or `YamlPrefabLoader` implementations that produce the same in-memory model.
 
@@ -363,10 +377,19 @@ The demo currently uses:
 - `ResourceManager`
 - `AssetLoaders`
 - `EntityPrefab`
-- `CombatSystem`
+- `MovementSystem`
 - `RenderSystem`
+- demo-owned `CombatSystem`
+- demo-owned `AttackIntentSystem`
 
-`CombatDemoScene` creates the combat entities during scene initialization from a prefab document loaded through `AssetLoaders` and cached by `ResourceManager`. A scheduled combat-round system advances one round per frame, publishes log events, and asks the application to stop when combat is complete. `RenderSystem` snapshots world state and sends live frames to SDL2 or terminal rendering backends.
+`CombatDemoScene` creates the combat entities during scene initialization from a prefab document loaded through `AssetLoaders` and cached by `ResourceManager`. Demo combat registers its own health and attack prefab component factories. SDL input is mapped into action state, the scene writes movement and attack intents, scheduled systems process those intents, demo combat publishes structured events, and `RenderSystem` emits draw commands for SDL2 or terminal rendering backends.
+
+Frame sequencing contract:
+
+- `Scene::update(...)` runs `onBeforeSystems(...)`, then scheduled systems, then `onAfterSystems(...)`.
+- The default `onAfterSystems(...)` calls the older `onUpdate(...)` hook for compatibility.
+- The demo processes input and writes movement/attack intents in `onBeforeSystems(...)`.
+- Simulation systems consume those intents in the same frame.
 
 The current SDL2 backend is intentionally simple. It proves that the renderer boundary can target a native window without pushing SDL types into gameplay systems. The terminal backend remains useful for fallback, tests, and headless environments.
 
@@ -381,16 +404,15 @@ The demo is now interactive, so the next session should harden the gameplay/runt
 Current state:
 
 - `Application::run(...)` uses a fixed delta and optional sleep.
-- `FrameContext` carries delta time and frame index.
+- `FrameContext` carries delta time, total elapsed time, frame index, and fixed-frame index.
 - `SystemScheduler` has phases and priorities.
-- There is no total-time field, fixed-step accumulator, pause state, or fixed-frame counter.
+- Scene hooks provide explicit before-systems and after-systems phases.
+- There is no fixed-step accumulator, pause state, or manual-step control yet.
 
 Next work:
 
 - Add a `Clock` or `Time` layer suitable for deterministic tests.
-- Expand `FrameContext` with total time and optional fixed-step fields.
-- Add fixed-step accumulation for simulation systems.
-- Add pause behavior if it fits cleanly.
+- Add fixed-step accumulation, pause/manual stepping, and tests.
 - Keep `runFrames(...)` or equivalent manual stepping for tests.
 
 Goal:
@@ -402,14 +424,13 @@ Goal:
 Current state:
 
 - SDL input feeds named actions.
-- Movement and attack intent components exist.
-- `MovementSystem` and `AttackIntentSystem` exist.
-- Combat publishes structured events, but `CombatSystem::attack(...)` still keeps a string-compatible wrapper.
+- Generic movement intent exists in the engine.
+- Combat-specific attack intent and combat systems live in the demo layer.
 - Enemy behavior is still simple demo logic.
 
 Next work:
 
-- Move more demo-specific intent writing into reusable systems where it makes sense.
+- Move more demo-specific intent writing into sample gameplay systems where it makes sense.
 - Add team/targeting components.
 - Add cooldown/range rules.
 - Split damage/death handling further if combat grows.
@@ -425,16 +446,14 @@ Goal:
 Current state:
 
 - `PositionComponent` exists.
-- There is no real transform model.
-- No parent/child hierarchy exists.
+- `TransformComponent` and `WorldTransformComponent` exist.
+- `TransformSystem` computes parent/child world transforms.
+- Cyclic parent chains fall back to local transforms.
 
 Next work:
 
-- Add `TransformComponent` with local position, rotation, and scale.
-- Add parent/child relationship support or a companion hierarchy component.
-- Add a `TransformSystem` that computes world transforms from local transforms.
 - Decide how this relates to the existing `PositionComponent`.
-- Add tests for parent movement, child world transforms, reparenting, and entity destruction.
+- Add richer tests for reparenting and entity destruction.
 
 Goal:
 
@@ -447,13 +466,13 @@ Current state:
 - Entities and components work.
 - Component storage is simple and testable.
 - `World::each<T...>()` supports basic component-set iteration.
-- Lifecycle semantics are still basic.
+- Entity IDs are generation-aware.
+- `World::deferDestroyEntity(...)` allows systems to queue destruction safely during update.
 
 Next work:
 
-- Add entity generations or handles to prevent stale entity references.
 - Add safer component access patterns.
-- Add deferred entity destruction so systems can safely iterate while entities are being removed.
+- Add deferred component add/remove command support.
 - Add tests around invalid entities, destroyed entities, component removal, and iteration safety.
 
 Goal:
@@ -558,42 +577,40 @@ Goal:
 
 Current state:
 
-- The current visual demo proves integration.
-- It is still automated.
-- It uses SDL2 rendering when available.
-- It does not yet use a real input backend.
+- The current demo is already a small interactive combat prototype.
+- It loads entities from prefab data.
+- It uses SDL2 input/rendering when available.
+- It falls back to terminal rendering when SDL2 is not available.
+- It still keeps some input, AI, and win/loss orchestration in scene code.
 
 Next work:
 
-- After the runtime loop, transforms, and renderer boundary exist, build a small interactive prototype.
-- Candidate prototype:
-  - player can move
-  - player can attack
-  - enemy responds through a simple AI state machine
-  - entities are prefab-loaded
-  - systems handle movement, combat, rendering, events, and win/loss flow
+- Harden the existing prototype instead of replacing it.
+- Move reusable input-intent and enemy-decision behavior out of scene code where it makes sense.
+- Add a simple AI state machine for enemy behavior.
+- Add win/loss flow that is event-driven and less coupled to the demo scene.
+- Keep the demo as an integration test for prefabs, input, systems, events, resources, and rendering.
 
 Goal:
 
-- Prove that the framework can support an actual small game loop, not only an automated showcase.
+- Keep a playable proof that the framework supports an actual small game loop while the engine contracts mature.
 
 ### Recommended Order
 
 For the next coding session, the best order is:
 
-1. Add the runtime time/fixed-step foundation.
-2. Expand `FrameContext` with total time and fixed-step data.
-3. Add tests for frame progression, fixed-step catch-up, pause/manual stepping, and deterministic frame indexing.
-4. Add `TransformComponent` and a basic `TransformSystem`.
-5. Add deferred entity destruction.
-6. Then expand gameplay rules and renderer draw commands.
+1. Add fixed-step accumulation, pause/manual stepping, and tests.
+2. Add deferred component add/remove command support.
+3. Add camera and sprite/render components on top of the current renderable path.
+4. Add scene description assets that can create entities, components, and system setup.
+5. Then expand gameplay rules and renderer draw commands.
 
 If time is short, prioritize:
 
 1. `Clock` / `Time`.
-2. `FrameContext` expansion.
-3. Fixed-step simulation.
-4. Deferred destruction.
+2. Fixed-step simulation.
+3. Pause/manual stepping.
+4. Deferred component mutation.
 
 ---
 
@@ -612,8 +629,9 @@ Current architecture:
 - ApplicationContext is the narrow interface scenes use for app services.
 - Scene owns a World and SystemScheduler.
 - World owns entity/component state and an EventBus.
-- ECS currently supports entities and components such as HealthComponent, AttackComponent, and PositionComponent.
+- ECS currently supports generation-aware entities and generic components such as PositionComponent, MoveIntentComponent, ProgressComponent, NameComponent, RenderableComponent, TransformComponent, and WorldTransformComponent.
 - SystemScheduler runs ISystem instances using FrameContext, phases, priorities, and deterministic insertion-order ties.
+- Scene update order is now before-systems hooks, scheduled systems, then after-systems hooks.
 - EventBus provides typed publish/subscribe messaging.
 - ResourceManager caches typed resources, supports reload, tracks metadata, and publishes resource events.
 - FileSystem and AssetLoaders load text, binary, and key/value prefab documents.
@@ -621,27 +639,28 @@ Current architecture:
 - StateMachine<StateID> exists as a generic utility.
 - InputManager tracks named action held/pressed/released state.
 - SdlInputBackend maps SDL keyboard/window events into InputManager actions.
-- RenderSystem uses an IRenderBackend boundary.
+- RenderSystem emits backend-neutral DrawFrame/DrawCommand data through an IRenderBackend boundary.
 - SDL2 and terminal render backends exist.
-- MoveIntentComponent, AttackIntentComponent, MovementSystem, and AttackIntentSystem exist.
-- Combat publishes structured events.
+- MoveIntentComponent, MovementSystem, TransformComponent, and TransformSystem exist in the engine.
+- Combat-specific components, systems, and events live under the demo gameplay layer.
 - The demo currently runs a playable SDL2 combat encounter with terminal rendering as fallback.
 
 Important current limitation:
-The demo is playable but still uses a very simple time model, simple enemy behavior, immediate entity destruction, and snapshot-style rendering rather than backend-neutral draw commands.
+The demo is playable but still has a very simple fixed-delta time model, simple enemy behavior, and early draw-command rendering rather than asset-backed sprites, cameras, or rich transform-aware rendering.
+
+The current performance benchmark shows draw-frame construction as the primary measured hotspot.
 
 Next priority:
 Build the runtime time/fixed-step foundation.
 
 Implement conservatively:
 1. Add a Clock/Time abstraction suitable for deterministic tests.
-2. Expand FrameContext with totalTime and fixed-step fields where appropriate.
-3. Add fixed-step simulation support without breaking runFrames/manual testing.
-4. Add pause behavior if it fits cleanly.
-5. Keep InputManager backend-agnostic.
-6. Preserve SDL and terminal rendering.
-7. Keep existing public behavior working where possible.
-8. Add tests for timing, fixed-step catch-up, pause/manual stepping, and deterministic frame indexing.
+2. Add fixed-step simulation support without breaking runFrames/manual testing.
+3. Add pause behavior if it fits cleanly.
+4. Keep InputManager backend-agnostic.
+5. Preserve SDL and terminal rendering.
+6. Keep existing public behavior working where possible.
+7. Add tests for timing, fixed-step catch-up, pause/manual stepping, deterministic frame indexing, and input-to-intent timing.
 
 Constraints:
 - Use the existing code style and simple architecture.
@@ -652,184 +671,30 @@ Constraints:
 - If the demo is changed, run ./build/GameCoreDemo and confirm SDL2 or terminal rendering displays live combat frames.
 
 Good follow-up after timing:
-- TransformComponent and TransformSystem with parent/child world transform calculation.
-- Renderer draw-command model with sprites, layers, text, and cameras.
-- ECS maturity: entity generations, query views, deferred destruction.
+- Deferred component add/remove command support.
+- Sprite/camera rendering on top of the renderable component path.
 - Stronger prefab validation and future JSON/YAML loader boundary.
 - Resource dependency metadata and diagnostics.
 ```
 
 ---
 
-## 9. Previous Gameplay Roadmap
+## 9. Completed Gameplay Roadmap And Remaining Cleanup
 
-The items below are still useful details and should be folded into the recommended order above as the framework grows.
+The previous gameplay roadmap has mostly been implemented:
 
-### 1. Input Backend Bridge
+- SDL input feeds `InputManager`.
+- Engine movement intent exists.
+- Combat-specific attack intent and attack systems exist in the demo layer.
+- Demo combat publishes `CombatMessageEvent`, `DamageAppliedEvent`, and `EntityDefeatedEvent`.
+- The demo is interactive and prefab-loaded.
 
-Current state:
+Remaining gameplay cleanup:
 
-- `InputManager` exists.
-- It tracks named actions.
-- No real keyboard, terminal, controller, or platform backend feeds it yet.
-
-Next work:
-
-- Add an SDL input adapter first.
-- Add a simple terminal input adapter or scripted input adapter later.
-- Translate raw input into action names such as `Attack`, `Confirm`, `MoveUp`, and `MoveDown`.
-- Keep the adapter separate from `InputManager`.
-- Add tests for action mapping and frame transitions.
-
-Goal:
-
-- The demo or first game should react to input instead of advancing fully automatically.
-
-### 2. Movement Foundation
-
-Current state:
-
-- `PositionComponent` exists.
-- There is no movement component or movement system.
-
-Next work:
-
-- Add `VelocityComponent` or `MovementIntentComponent`.
-- Add `MovementSystem`.
-- Use `InputManager` to set movement intent.
-- Update positions through a scheduled system.
-- Add prefab support for any new movement-related component if needed.
-
-Goal:
-
-- Entities should be able to move through systems rather than direct scene code.
-
-### 3. Event-Driven Combat Cleanup
-
-Current state:
-
-- `CombatSystem` returns strings.
-- The demo wraps those strings in `CombatLogEvent`.
-- Combat is not fully event-native yet.
-
-Next work:
-
-- Add explicit events such as:
-  - `DamageAppliedEvent`
-  - `EntityDefeatedEvent`
-  - `CombatMessageEvent`
-- Update combat/demo flow to publish structured events.
-- Keep string formatting at the presentation/logging boundary.
-
-Goal:
-
-- Combat systems should produce structured facts, not only text.
-
-### 4. Prefab Expansion
-
-Current state:
-
-- Prefabs support health, attack, and position.
-- Key/value loading works.
-- The in-memory `EntityPrefab` model is format-neutral.
-
-Next work:
-
-- Add prefab support for any new movement/input-related components.
-- Add better validation for incomplete prefab component groups.
-- Consider separating prefab parsing errors into clearer error types later.
-
-Goal:
-
-- Gameplay entities should remain data-driven as new components are added.
-
-### 5. Scene Description Layer
-
-Current state:
-
-- Individual entities can be loaded from prefab documents.
-- A scene itself is still C++-defined.
-
-Next work:
-
-- Add a simple scene description model that lists prefab files or entity definitions.
-- Load a scene description through `AssetLoaders`.
-- Instantiate scene contents inside `Scene::onInitialize`.
-
-Goal:
-
-- Scenes should eventually be mostly data-defined, with C++ used for behavior and custom orchestration.
-
-### 6. Logging And Diagnostics
-
-Current state:
-
-- Diagnostics supports info/warning/error/debug levels.
-- Diagnostics output can be redirected through configurable sinks.
-- Tests use assertions.
-
-Next work:
-
-- Add assertion helpers for engine invariants.
-- Add optional profiling scopes around systems.
-- Route more demo/runtime messages through diagnostics or events.
-
-Goal:
-
-- Engine output should be consistent and easy to redirect later.
-
-### 7. Test Organization
-
-Current state:
-
-- `tests/basic_tests.cpp` is broad and useful but becoming large.
-
-Next work:
-
-- Split tests by subsystem:
-  - `entity_tests.cpp`
-  - `world_tests.cpp`
-  - `event_tests.cpp`
-  - `resource_tests.cpp`
-  - `prefab_tests.cpp`
-  - `application_scene_tests.cpp`
-  - `input_tests.cpp`
-- Keep CTest running all test executables.
-
-Goal:
-
-- Keep test coverage broad while making failures easier to locate.
-
-### 8. First Interactive Prototype
-
-After the above pieces, build a small interactive prototype.
-
-Candidate:
-
-- A terminal/grid encounter.
-- Player can move.
-- Player can attack.
-- Enemy can respond through a simple AI state machine.
-- Entities are loaded from prefab data.
-- Systems handle movement, combat, rendering/logging, and win/loss conditions.
-
-Goal:
-
-- Prove that the framework can support an actual small game loop, not only an automated demo.
-
-### Recommended Order
-
-For the next coding session, the best order is:
-
-1. Split tests by subsystem if the session starts with cleanup.
-2. Add input backend bridge.
-3. Add movement component/system.
-4. Make combat event-native.
-5. Expand prefab support for new components.
-6. Refactor the demo into the first interactive prototype.
-
-If time is short, prioritize:
-
-1. Input backend bridge.
-2. Movement system.
-3. Interactive demo update.
+- Add tests for SDL action mapping indirectly through backend-independent input contracts where possible.
+- Move reusable intent-writing behavior out of the demo scene if it becomes shared.
+- Add `TeamComponent`, `TargetComponent`, range, cooldown, and clearer targeting rules.
+- Add a small AI state-machine example for enemy behavior.
+- Improve prefab validation for incomplete or inconsistent component groups.
+- Add a scene description layer so scene contents can become more data-defined.
+- Split broad tests into subsystem-specific executables as coverage grows.

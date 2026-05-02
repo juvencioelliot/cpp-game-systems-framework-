@@ -10,6 +10,8 @@ namespace GameCore::Core
     {
         float deltaSeconds{0.0F};
         std::uint64_t frameIndex{0};
+        float totalSeconds{0.0F};
+        std::uint64_t fixedFrameIndex{0};
     };
 
     class ISystem

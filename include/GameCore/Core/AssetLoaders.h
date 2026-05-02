@@ -35,5 +35,10 @@ namespace GameCore::Core
         static ResourceHandle<PrefabDocument> loadKeyValuePrefab(ResourceManager& resources,
                                                                  const std::string& id,
                                                                  const std::string& path);
+
+        static ResourceHandle<PrefabDocument> loadKeyValuePrefab(ResourceManager& resources,
+                                                                 const std::string& id,
+                                                                 const std::string& path,
+                                                                 const PrefabComponentRegistry& registry);
     };
 }

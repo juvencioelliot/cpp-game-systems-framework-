@@ -143,7 +143,7 @@ namespace GameCore::Systems
         }
     }
 
-    void SdlRenderBackend::render(const RenderFrame& frame)
+    void SdlRenderBackend::render(const DrawFrame& frame)
     {
         auto* renderer = m_impl->renderer;
         fillRect(renderer, 0, 0, m_impl->width, m_impl->height, SDL_Color{15, 23, 42, 255});
@@ -173,14 +173,14 @@ namespace GameCore::Systems
             SDL_RenderDrawLine(renderer, arenaX, y, arenaX + arenaWidth, y);
         }
 
-        int healthY = arenaY + arenaHeight + 28;
-        for (const auto& entity : frame.entities)
+        int progressY = arenaY + arenaHeight + 28;
+        for (const auto& command : frame.commands)
         {
-            if (entity.alive && entity.hasPosition)
+            if (command.type == DrawCommandType::GridCell && command.active)
             {
-                const int x = arenaX + std::clamp(entity.x, 0, ArenaColumns - 1) * m_impl->cellSize;
-                const int y = arenaY + std::clamp(entity.y, 0, ArenaRows - 1) * m_impl->cellSize;
-                const SDL_Color color = entityColor(entity.glyph);
+                const int x = arenaX + std::clamp(command.x, 0, ArenaColumns - 1) * m_impl->cellSize;
+                const int y = arenaY + std::clamp(command.y, 0, ArenaRows - 1) * m_impl->cellSize;
+                const SDL_Color color = entityColor(command.glyph);
                 fillRect(renderer, x + 4, y + 4, m_impl->cellSize - 8, m_impl->cellSize - 8, color);
                 drawRect(renderer,
                          x + 4,
@@ -189,24 +189,29 @@ namespace GameCore::Systems
                          m_impl->cellSize - 8,
                          SDL_Color{226, 232, 240, 255});
             }
+        }
+
+        for (const auto& command : frame.commands)
+        {
+            if (command.type != DrawCommandType::ProgressBar)
+            {
+                continue;
+            }
 
             const int barX = 48;
             constexpr int barWidth = 260;
             constexpr int barHeight = 18;
-            const SDL_Color color = entity.alive ? entityColor(entity.glyph) : SDL_Color{100, 116, 139, 255};
-            fillRect(renderer, barX, healthY, barWidth, barHeight, SDL_Color{51, 65, 85, 255});
-            if (entity.hasHealth)
-            {
-                fillRect(renderer,
-                         barX,
-                         healthY,
-                         (barWidth * healthPercentage(entity.currentHealth, entity.maxHealth)) / 100,
-                         barHeight,
-                         color);
-            }
-            drawRect(renderer, barX, healthY, barWidth, barHeight, SDL_Color{148, 163, 184, 255});
-            fillRect(renderer, barX - 28, healthY, 18, 18, color);
-            healthY += 32;
+            const SDL_Color color = command.active ? entityColor(command.glyph) : SDL_Color{100, 116, 139, 255};
+            fillRect(renderer, barX, progressY, barWidth, barHeight, SDL_Color{51, 65, 85, 255});
+            fillRect(renderer,
+                     barX,
+                     progressY,
+                     (barWidth * progressPercentage(command.value, command.maxValue)) / 100,
+                     barHeight,
+                     color);
+            drawRect(renderer, barX, progressY, barWidth, barHeight, SDL_Color{148, 163, 184, 255});
+            fillRect(renderer, barX - 28, progressY, 18, 18, color);
+            progressY += 32;
         }
 
         SDL_RenderPresent(renderer);

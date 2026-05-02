@@ -40,4 +40,16 @@ namespace GameCore::Core
                 KeyValuePrefabLoader::loadFromFile(path));
         }, path);
     }
+
+    ResourceHandle<PrefabDocument> AssetLoaders::loadKeyValuePrefab(
+        ResourceManager& resources,
+        const std::string& id,
+        const std::string& path,
+        const PrefabComponentRegistry& registry)
+    {
+        return resources.load<PrefabDocument>(id, [path, registry]() {
+            return std::make_shared<PrefabDocument>(
+                KeyValuePrefabLoader::loadFromFile(path, registry));
+        }, path);
+    }
 }

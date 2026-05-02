@@ -11,16 +11,6 @@ namespace GameCore::Core
     {
         const EntityID entity = world.createEntity();
 
-        if (prefab.health.has_value())
-        {
-            world.addComponent(entity, *prefab.health);
-        }
-
-        if (prefab.attack.has_value())
-        {
-            world.addComponent(entity, *prefab.attack);
-        }
-
         if (prefab.position.has_value())
         {
             world.addComponent(entity, *prefab.position);

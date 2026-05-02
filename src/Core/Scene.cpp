@@ -20,8 +20,10 @@ namespace GameCore::Core
             initialize();
         }
 
+        onBeforeSystems(context);
         m_systems.update(m_world, context);
-        onUpdate(context);
+        m_world.flushDeferredDestruction();
+        onAfterSystems(context);
     }
 
     void Scene::shutdown()

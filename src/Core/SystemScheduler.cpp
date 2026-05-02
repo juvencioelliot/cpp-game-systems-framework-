@@ -6,22 +6,26 @@ namespace GameCore::Core
 {
     void SystemScheduler::update(World& world, const FrameContext& context)
     {
-        std::stable_sort(m_systems.begin(),
-                         m_systems.end(),
-                         [](const SystemEntry& left, const SystemEntry& right) {
-                             if (left.order.phase != right.order.phase)
-                             {
-                                 return static_cast<int>(left.order.phase) <
-                                        static_cast<int>(right.order.phase);
-                             }
+        if (m_needsSort)
+        {
+            std::stable_sort(m_systems.begin(),
+                             m_systems.end(),
+                             [](const SystemEntry& left, const SystemEntry& right) {
+                                 if (left.order.phase != right.order.phase)
+                                 {
+                                     return static_cast<int>(left.order.phase) <
+                                            static_cast<int>(right.order.phase);
+                                 }
 
-                             if (left.order.priority != right.order.priority)
-                             {
-                                 return left.order.priority < right.order.priority;
-                             }
+                                 if (left.order.priority != right.order.priority)
+                                 {
+                                     return left.order.priority < right.order.priority;
+                                 }
 
-                             return left.insertionOrder < right.insertionOrder;
-                         });
+                                 return left.insertionOrder < right.insertionOrder;
+                             });
+            m_needsSort = false;
+        }
 
         for (auto& system : m_systems)
         {
@@ -33,6 +37,7 @@ namespace GameCore::Core
     {
         m_systems.clear();
         m_nextInsertionOrder = 0;
+        m_needsSort = false;
     }
 
     std::size_t SystemScheduler::systemCount() const

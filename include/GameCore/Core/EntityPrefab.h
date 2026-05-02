@@ -1,7 +1,5 @@
 #pragma once
 
-#include "GameCore/Components/AttackComponent.h"
-#include "GameCore/Components/HealthComponent.h"
 #include "GameCore/Components/PositionComponent.h"
 #include "GameCore/Core/Entity.h"
 
@@ -29,8 +27,6 @@ namespace GameCore::Core
     struct EntityPrefab
     {
         std::string name;
-        std::optional<Components::HealthComponent> health;
-        std::optional<Components::AttackComponent> attack;
         std::optional<Components::PositionComponent> position;
         std::vector<RuntimePrefabComponent> runtimeComponents;
     };

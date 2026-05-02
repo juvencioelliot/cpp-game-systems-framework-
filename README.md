@@ -4,6 +4,8 @@ GameCoreCPP is a modular C++ game systems framework. It is not trying to clone U
 
 The current demo runs a playable player-versus-enemy combat scene through the engine runtime. It renders live frames through SDL2 when available, with a terminal renderer as fallback.
 
+Combat is sample gameplay, not an engine-core assumption. The engine core now focuses on generic ECS lifetime, scheduling, resources, prefabs, input actions, transforms, and backend-neutral rendering.
+
 ## Goals
 
 - Demonstrate modern, readable C++ architecture.
@@ -65,11 +67,36 @@ After building, run the test suite with CTest:
 ctest --test-dir build --output-on-failure
 ```
 
+### 6. Run the benchmark
+
+Benchmarks are optional:
+
+```bash
+cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=TRUE -DGAMECORE_BUILD_BENCHMARKS=ON
+cmake --build build-perf --target GameCoreRuntimeBenchmark
+./build-perf/GameCoreRuntimeBenchmark
+```
+
+The current benchmark covers entity lifetime, component iteration, movement, event publishing, and draw-frame building.
+
+## Documentation
+
+- `README.md`: project entry point and high-level current architecture.
+- `FRAMEWORK_OVERVIEW.md`: conceptual walkthrough of the runtime pieces.
+- `FRAMEWORK_USAGE.md`: practical usage examples.
+- `PROJECT_DESIGN.md`: design rationale, roadmap, and future agent handoff.
+- `CODING_SESSION_CHANGES.md`: detailed record of the latest architecture session.
+
 ## Current Architecture
 
 ```text
 GameCoreCPP/
 ├── CMakeLists.txt
+├── CODING_SESSION_CHANGES.md
+├── FRAMEWORK_OVERVIEW.md
+├── FRAMEWORK_USAGE.md
+├── PROJECT_DESIGN.md
+├── README.md
 ├── include/
 │   └── GameCore/
 │       ├── Core/
@@ -92,12 +119,16 @@ GameCoreCPP/
 │       │   ├── SystemScheduler.h
 │       │   └── World.h
 │       ├── Components/
-│       │   ├── AttackComponent.h
-│       │   ├── HealthComponent.h
-│       │   └── PositionComponent.h
+│       │   ├── MoveIntentComponent.h
+│       │   ├── NameComponent.h
+│       │   ├── PositionComponent.h
+│       │   ├── ProgressComponent.h
+│       │   ├── RenderableComponent.h
+│       │   └── TransformComponent.h
 │       └── Systems/
-│           ├── CombatSystem.h
-│           └── RenderSystem.h
+│           ├── MovementSystem.h
+│           ├── RenderSystem.h
+│           └── TransformSystem.h
 ├── src/
 │   ├── Core/
 │   │   ├── Application.cpp
@@ -110,12 +141,18 @@ GameCoreCPP/
 │   │   ├── SceneManager.cpp
 │   │   └── SystemScheduler.cpp
 │   └── Systems/
-│       ├── CombatSystem.cpp
-│       └── RenderSystem.cpp
+│       ├── MovementSystem.cpp
+│       ├── RenderSystem.cpp
+│       └── TransformSystem.cpp
+├── benchmarks/
+│   └── runtime_benchmark.cpp
 ├── demo/
+│   ├── CombatGameplay.cpp
+│   ├── CombatGameplay.h
 │   └── main.cpp
 └── tests/
-    └── basic_tests.cpp
+    ├── basic_tests.cpp
+    └── world_tests.cpp
 ```
 
 ### Core
@@ -125,8 +162,8 @@ GameCoreCPP/
 - `AssetLoaders` provides file-backed resource loader helpers for built-in resource types.
 - `Diagnostics` provides level-based logging with configurable sinks.
 - `EntityPrefab` defines a format-neutral prefab data model and instantiation helpers.
-- `Entity.h` defines `EntityID`, the lightweight identifier used to represent game objects.
-- `EntityManager` creates, destroys, tracks, and recycles entity IDs.
+- `Entity.h` defines `EntityID`, the lightweight generation-aware identifier used to represent game objects.
+- `EntityManager` creates, destroys, tracks, and recycles entity IDs while rejecting stale recycled handles.
 - `ComponentStorage<T>` is a small generic storage class backed by `std::unordered_map<EntityID, T>`.
 - `EventBus` provides typed publish/subscribe messaging for decoupled runtime communication.
 - `FileSystem` provides basic text and binary file reads.
@@ -136,25 +173,34 @@ GameCoreCPP/
 - `Scene` groups a `World`, a `SystemScheduler`, and lifecycle hooks into a runtime unit.
 - `SceneManager` registers named scene factories and switches the active application scene.
 - `StateMachine<StateID>` provides reusable state lifecycle and transition handling for gameplay, AI, UI, and runtime modes.
-- `FrameContext` carries per-frame timing and frame index data into runtime systems.
+- `FrameContext` carries delta time, total time, frame index, and fixed-frame index data into runtime systems.
 - `ISystem` defines the update contract for systems that run every frame.
 - `SystemScheduler` owns runtime systems and updates them in explicit registration order.
-- `World` is the main runtime facade. It owns entity lifetime, creates component storages on demand, removes an entity's components when that entity is destroyed, and exposes the event bus.
+- `World` is the main runtime facade. It owns entity lifetime, creates component storages on demand, supports immediate and deferred destruction, removes an entity's components when that entity is destroyed, and exposes the event bus.
+
+Scene updates run in a clear order: before-systems hooks, scheduled systems, deferred destruction flush, then after-systems hooks.
 
 ### Components
 
 Components are simple data structs:
 
-- `HealthComponent` stores current and maximum health.
-- `AttackComponent` stores attack damage.
 - `PositionComponent` stores a simple grid position.
+- `MoveIntentComponent` stores requested grid movement for the next movement update.
+- `ProgressComponent` stores generic current/max progress for rendering bars.
+- `NameComponent` stores a display/debug name.
+- `RenderableComponent` stores generic visibility and glyph/layer render data.
+- `TransformComponent` stores local transform data.
+- `WorldTransformComponent` stores resolved world transform data.
+
+Combat-specific health and attack components live in the demo gameplay layer, not the engine core.
 
 ### Systems
 
 Systems contain behavior:
 
-- `CombatSystem` reads attack components and updates health components.
-- `RenderSystem` snapshots component state and sends frames to a rendering backend. The current backends are SDL2 and terminal.
+- `MovementSystem` applies movement intent to positions.
+- `TransformSystem` resolves parented local transforms into world transforms.
+- `RenderSystem` builds backend-neutral draw commands from renderable component data and sends them to a rendering backend. The current backends are SDL2 and terminal.
 - Runtime systems can implement `ISystem` and be driven by `SystemScheduler`.
 
 ### State Machines
@@ -167,11 +213,13 @@ The framework provides a generic `StateMachine<StateID>`. It supports registered
 
 ### Application
 
-`Application` owns the active scene, shared resources, input state, and frame updates with `FrameContext`. It can replace scenes, stop the frame loop, and track the current frame index.
+`Application` owns the active scene, shared resources, input state, and frame updates with `FrameContext`. It can replace scenes, stop the frame loop, and track the current frame index and accumulated runtime.
 
 ### Input
 
-`InputManager` tracks named actions such as `Attack`, `Confirm`, or `MoveUp`. It is backend-agnostic: platform code can set action states, and scenes/systems can query `wasPressed`, `isHeld`, and `wasReleased`.
+`InputManager` tracks named actions such as `PrimaryAction`, `Confirm`, or `MoveUp`. It is backend-agnostic: platform code can set action states, and scenes/systems can query `wasPressed`, `isHeld`, and `wasReleased`.
+
+When SDL2 is available, `SdlInputBackend` maps keyboard and window events into those actions. Other platform, controller, terminal, or scripted input backends can feed the same `InputManager` contract later.
 
 ### Resources
 
@@ -200,6 +248,7 @@ Built-in file helpers:
 - `AssetLoaders::loadText(resources, id, path)`
 - `AssetLoaders::loadBinary(resources, id, path)`
 - `AssetLoaders::loadKeyValuePrefab(resources, id, path)`
+- `AssetLoaders::loadKeyValuePrefab(resources, id, path, registry)`
 
 ### Prefabs
 
@@ -218,20 +267,18 @@ Current prefab support:
 
 Current built-in prefab components:
 
-- `HealthComponent`
-- `AttackComponent`
 - `PositionComponent`
+- Custom components through `PrefabComponentRegistry`
 
 Example key/value prefab format:
 
 ```text
 [Player]
-health.current=120
-health.max=120
-attack.damage=25
 position.x=0
 position.y=0
 ```
+
+The combat demo registers `health.*` and `attack.*` prefixes through `PrefabComponentRegistry`, which shows how game-specific data can stay outside the engine core.
 
 ### Scene Management
 
@@ -245,17 +292,19 @@ position.y=0
 2. Registers `CombatDemoScene` through `SceneManager`.
 3. Loads a key/value prefab document through `AssetLoaders` and `ResourceManager`.
 4. Instantiates entities and components through `PrefabInstantiator`.
-5. Runs combat through a scheduled `ISystem`.
+5. Runs movement and demo-owned combat intent through scheduled `ISystem` implementations.
 6. Publishes combat log events through `EventBus`.
-7. Displays state through `RenderSystem`.
+7. Displays generic `RenderableComponent`, `NameComponent`, and `ProgressComponent` data through `RenderSystem`.
 
 ## Future Improvements
 
-- Add movement and input systems.
-- Add better test coverage for systems and world/component contracts.
-- Publish combat results through events instead of string-only return values.
+- Add a real time/fixed-step layer with pause and manual stepping.
+- Add tests for fixed-step catch-up, deterministic timing, and input-to-intent timing.
+- Add deferred component add/remove command support.
+- Add camera and sprite/render components on top of the draw-command path.
 - Add structured-data loaders for scene descriptions and gameplay definitions.
 - Add JSON/YAML prefab loaders behind the same `EntityPrefab` model.
 - Add serialization for saving and loading simple game state.
+- Add pooled or archetype-style storage if profiling shows component iteration needs it.
 - Add resource, scene, and module boundaries before scaling into rendering/audio/physics layers.
-- Expand the demo into a small turn-based encounter.
+- Expand rendering beyond glyph-backed demo draw commands once asset and scene contracts stabilize.

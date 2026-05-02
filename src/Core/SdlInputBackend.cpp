@@ -34,7 +34,7 @@ namespace GameCore::Core
                 break;
             case SDLK_SPACE:
             case SDLK_RETURN:
-                input.setActionDown("Attack", isDown);
+                input.setActionDown("PrimaryAction", isDown);
                 break;
             case SDLK_ESCAPE:
                 input.setActionDown("Quit", isDown);

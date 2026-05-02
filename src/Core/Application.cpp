@@ -31,8 +31,9 @@ namespace GameCore::Core
 
         for (std::uint64_t i = 0; i < frameCount && m_running; ++i)
         {
-            m_activeScene->update(FrameContext{deltaSeconds, m_frameIndex});
+            m_activeScene->update(FrameContext{deltaSeconds, m_frameIndex, m_totalSeconds, m_frameIndex});
             ++m_frameIndex;
+            m_totalSeconds += deltaSeconds;
             m_input.beginFrame();
         }
 
@@ -53,9 +54,13 @@ namespace GameCore::Core
         {
             const auto frameStart = std::chrono::steady_clock::now();
 
-            m_activeScene->update(FrameContext{options.fixedDeltaSeconds, m_frameIndex});
+            m_activeScene->update(FrameContext{options.fixedDeltaSeconds,
+                                              m_frameIndex,
+                                              m_totalSeconds,
+                                              framesRun});
             ++m_frameIndex;
             ++framesRun;
+            m_totalSeconds += options.fixedDeltaSeconds;
             m_input.beginFrame();
 
             if (options.sleepToMaintainRate && options.fixedDeltaSeconds > 0.0F)
@@ -85,6 +90,11 @@ namespace GameCore::Core
     std::uint64_t Application::frameIndex() const
     {
         return m_frameIndex;
+    }
+
+    float Application::totalSeconds() const
+    {
+        return m_totalSeconds;
     }
 
     InputManager& Application::input()

@@ -5,11 +5,13 @@
 #include "GameCore/Core/EntityManager.h"
 #include "GameCore/Core/EventBus.h"
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
+#include <vector>
 
 namespace GameCore::Core
 {
@@ -34,6 +36,33 @@ namespace GameCore::Core
             }
 
             m_entities.destroyEntity(entity);
+        }
+
+        void deferDestroyEntity(EntityID entity)
+        {
+            if (m_entities.isAlive(entity) &&
+                std::find(m_deferredDestroyEntities.begin(),
+                          m_deferredDestroyEntities.end(),
+                          entity) == m_deferredDestroyEntities.end())
+            {
+                m_deferredDestroyEntities.push_back(entity);
+            }
+        }
+
+        void flushDeferredDestruction()
+        {
+            const auto entities = std::move(m_deferredDestroyEntities);
+            m_deferredDestroyEntities.clear();
+
+            for (const auto entity : entities)
+            {
+                destroyEntity(entity);
+            }
+        }
+
+        [[nodiscard]] std::size_t deferredDestroyCount() const
+        {
+            return m_deferredDestroyEntities.size();
         }
 
         [[nodiscard]] bool isAlive(EntityID entity) const
@@ -224,5 +253,6 @@ namespace GameCore::Core
         EntityManager m_entities;
         EventBus m_events;
         std::unordered_map<std::type_index, std::unique_ptr<IComponentStorage>> m_componentStorages;
+        std::vector<EntityID> m_deferredDestroyEntities;
     };
 }

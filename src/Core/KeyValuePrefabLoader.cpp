@@ -72,39 +72,6 @@ namespace GameCore::Core
                 return;
             }
 
-            if (key == "health.current")
-            {
-                if (!prefab.health.has_value())
-                {
-                    prefab.health = Components::HealthComponent{};
-                }
-
-                prefab.health->currentHealth = parseInt(key, value, lineNumber);
-                return;
-            }
-
-            if (key == "health.max")
-            {
-                if (!prefab.health.has_value())
-                {
-                    prefab.health = Components::HealthComponent{};
-                }
-
-                prefab.health->maxHealth = parseInt(key, value, lineNumber);
-                return;
-            }
-
-            if (key == "attack.damage")
-            {
-                if (!prefab.attack.has_value())
-                {
-                    prefab.attack = Components::AttackComponent{};
-                }
-
-                prefab.attack->damage = parseInt(key, value, lineNumber);
-                return;
-            }
-
             if (key == "position.x")
             {
                 if (!prefab.position.has_value())

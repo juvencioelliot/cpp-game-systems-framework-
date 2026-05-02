@@ -28,7 +28,12 @@ namespace GameCore::Core
         const ApplicationContext* application() const;
 
         virtual void onInitialize() {}
+        virtual void onBeforeSystems(const FrameContext&) {}
         virtual void onUpdate(const FrameContext&) {}
+        virtual void onAfterSystems(const FrameContext& context)
+        {
+            onUpdate(context);
+        }
         virtual void onShutdown() {}
 
     private:

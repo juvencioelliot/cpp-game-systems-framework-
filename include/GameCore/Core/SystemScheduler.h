@@ -46,6 +46,7 @@ namespace GameCore::Core
                 order,
                 m_nextInsertionOrder++,
             });
+            m_needsSort = true;
             return reference;
         }
 
@@ -64,5 +65,6 @@ namespace GameCore::Core
 
         std::vector<SystemEntry> m_systems;
         std::size_t m_nextInsertionOrder{0};
+        bool m_needsSort{false};
     };
 }

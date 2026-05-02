@@ -9,6 +9,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(GAMECORE_BUILD_BENCHMARKS "Build GameCore benchmark executables" OFF)
+
 if(EXISTS "/opt/homebrew")
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
 endif()
@@ -25,10 +27,9 @@ add_library(GameCoreCPP
     src/Core/Scene.cpp
     src/Core/SceneManager.cpp
     src/Core/SystemScheduler.cpp
-    src/Systems/AttackIntentSystem.cpp
-    src/Systems/CombatSystem.cpp
     src/Systems/MovementSystem.cpp
     src/Systems/RenderSystem.cpp
+    src/Systems/TransformSystem.cpp
 )
 
 find_package(SDL2 QUIET)
@@ -56,6 +57,7 @@ target_include_directories(GameCoreCPP
 )
 
 add_executable(GameCoreDemo
+    demo/CombatGameplay.cpp
     demo/main.cpp
 )
 
@@ -68,6 +70,17 @@ target_link_libraries(GameCoreDemo
     PRIVATE
         GameCoreCPP
 )
+
+if(GAMECORE_BUILD_BENCHMARKS)
+    add_executable(GameCoreRuntimeBenchmark
+        benchmarks/runtime_benchmark.cpp
+    )
+
+    target_link_libraries(GameCoreRuntimeBenchmark
+        PRIVATE
+            GameCoreCPP
+    )
+endif()
 
 enable_testing()
 

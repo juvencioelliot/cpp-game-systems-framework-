@@ -30,6 +30,7 @@ namespace GameCore::Core
 
         [[nodiscard]] bool isRunning() const;
         [[nodiscard]] std::uint64_t frameIndex() const;
+        [[nodiscard]] float totalSeconds() const;
 
         InputManager& input() override;
         const InputManager& input() const;
@@ -47,6 +48,7 @@ namespace GameCore::Core
         ResourceManager m_resources;
         Diagnostics m_diagnostics;
         std::uint64_t m_frameIndex{0};
+        float m_totalSeconds{0.0F};
         bool m_running{false};
     };
 }

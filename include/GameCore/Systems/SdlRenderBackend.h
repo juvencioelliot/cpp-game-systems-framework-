@@ -18,7 +18,7 @@ namespace GameCore::Systems
         SdlRenderBackend(SdlRenderBackend&&) = delete;
         SdlRenderBackend& operator=(SdlRenderBackend&&) = delete;
 
-        void render(const RenderFrame& frame) override;
+        void render(const DrawFrame& frame) override;
         [[nodiscard]] bool shouldClose() const override;
 
     private:

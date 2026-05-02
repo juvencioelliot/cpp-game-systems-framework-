@@ -11,7 +11,7 @@
 
 namespace GameCore::Systems
 {
-    [[nodiscard]] int healthPercentage(int currentHealth, int maxHealth);
+    [[nodiscard]] int progressPercentage(int value, int maxValue);
 
     struct RenderEntityLabel
     {
@@ -20,33 +20,48 @@ namespace GameCore::Systems
         char glyph{'?'};
     };
 
-    struct RenderEntityState
+    enum class DrawCommandType
     {
-        Core::EntityID entity{Core::InvalidEntity};
-        std::string name;
-        char glyph{'?'};
-        int x{0};
-        int y{0};
-        int currentHealth{0};
-        int maxHealth{0};
-        bool hasPosition{false};
-        bool hasHealth{false};
-        bool alive{false};
+        GridCell,
+        ProgressBar,
+        Text,
+        Rect,
     };
 
-    struct RenderFrame
+    struct DrawCommand
+    {
+        DrawCommandType type{DrawCommandType::GridCell};
+        int layer{0};
+        int x{0};
+        int y{0};
+        int width{0};
+        int height{0};
+        char glyph{'?'};
+        std::string text;
+        int value{0};
+        int maxValue{0};
+        bool active{true};
+    };
+
+    struct DrawFrame
     {
         std::uint64_t frameIndex{0};
         float deltaSeconds{0.0F};
-        std::vector<RenderEntityState> entities;
+        std::vector<DrawCommand> commands;
     };
+
+    [[nodiscard]] DrawFrame buildDrawFrame(Core::World& world,
+                                           const Core::FrameContext& context,
+                                           const std::vector<RenderEntityLabel>& entities);
+    [[nodiscard]] DrawFrame buildDrawFrame(Core::World& world,
+                                           const Core::FrameContext& context);
 
     class IRenderBackend
     {
     public:
         virtual ~IRenderBackend() = default;
 
-        virtual void render(const RenderFrame& frame) = 0;
+        virtual void render(const DrawFrame& frame) = 0;
         [[nodiscard]] virtual bool shouldClose() const;
     };
 
@@ -55,7 +70,7 @@ namespace GameCore::Systems
     public:
         explicit TerminalRenderBackend(std::ostream& output, bool clearScreen = true);
 
-        void render(const RenderFrame& frame) override;
+        void render(const DrawFrame& frame) override;
 
     private:
         std::ostream& m_output;
@@ -65,6 +80,7 @@ namespace GameCore::Systems
     class RenderSystem final : public Core::ISystem
     {
     public:
+        explicit RenderSystem(std::unique_ptr<IRenderBackend> backend);
         RenderSystem(std::unique_ptr<IRenderBackend> backend,
                      std::vector<RenderEntityLabel> entities);
 
@@ -74,5 +90,6 @@ namespace GameCore::Systems
     private:
         std::unique_ptr<IRenderBackend> m_backend;
         std::vector<RenderEntityLabel> m_entities;
+        bool m_useComponentQuery{false};
     };
 }

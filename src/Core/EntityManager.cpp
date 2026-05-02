@@ -1,46 +1,73 @@
 #include "GameCore/Core/EntityManager.h"
 
+#include <stdexcept>
+
 namespace GameCore::Core
 {
     EntityID EntityManager::createEntity()
     {
-        EntityID entity = InvalidEntity;
+        std::uint32_t index = 0;
 
-        if (!m_recycledEntities.empty())
+        if (!m_recycledIndices.empty())
         {
-            entity = m_recycledEntities.front();
-            m_recycledEntities.pop();
+            index = m_recycledIndices.front();
+            m_recycledIndices.pop();
         }
         else
         {
-            entity = m_nextEntity++;
+            if (m_slots.size() >= EntityMaxIndex)
+            {
+                throw std::runtime_error("EntityManager exhausted encodable entity indices.");
+            }
+
+            index = static_cast<std::uint32_t>(m_slots.size() + 1);
+            m_slots.push_back(EntitySlot{});
         }
 
-        m_livingEntities.insert(entity);
-        return entity;
+        auto& slot = m_slots[static_cast<std::size_t>(index - 1)];
+        slot.alive = true;
+        ++m_livingCount;
+        return makeEntityID(index, slot.generation);
     }
 
     void EntityManager::destroyEntity(EntityID entity)
     {
-        if (entity == InvalidEntity)
+        if (!isAlive(entity))
         {
             return;
         }
 
-        const auto removed = m_livingEntities.erase(entity);
-        if (removed > 0)
+        const auto index = entityIndex(entity);
+        auto& slot = m_slots[static_cast<std::size_t>(index - 1)];
+        slot.alive = false;
+        slot.generation = (slot.generation % EntityMaxGeneration) + 1;
+        if (slot.generation == entityGeneration(entity))
         {
-            m_recycledEntities.push(entity);
+            slot.generation = (slot.generation % EntityMaxGeneration) + 1;
         }
+        --m_livingCount;
+        m_recycledIndices.push(index);
     }
 
     bool EntityManager::isAlive(EntityID entity) const
     {
-        return m_livingEntities.find(entity) != m_livingEntities.end();
+        if (entity == InvalidEntity)
+        {
+            return false;
+        }
+
+        const auto index = entityIndex(entity);
+        if (index == 0 || index > m_slots.size())
+        {
+            return false;
+        }
+
+        const auto& slot = m_slots[static_cast<std::size_t>(index - 1)];
+        return slot.alive && slot.generation == entityGeneration(entity);
     }
 
     std::size_t EntityManager::livingCount() const
     {
-        return m_livingEntities.size();
+        return m_livingCount;
     }
 }

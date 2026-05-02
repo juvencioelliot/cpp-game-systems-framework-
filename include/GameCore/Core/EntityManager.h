@@ -3,7 +3,7 @@
 #include "GameCore/Core/Entity.h"
 
 #include <queue>
-#include <unordered_set>
+#include <vector>
 
 namespace GameCore::Core
 {
@@ -17,8 +17,14 @@ namespace GameCore::Core
         [[nodiscard]] std::size_t livingCount() const;
 
     private:
-        EntityID m_nextEntity{1};
-        std::queue<EntityID> m_recycledEntities;
-        std::unordered_set<EntityID> m_livingEntities;
+        struct EntitySlot
+        {
+            std::uint32_t generation{1};
+            bool alive{false};
+        };
+
+        std::vector<EntitySlot> m_slots;
+        std::queue<std::uint32_t> m_recycledIndices;
+        std::size_t m_livingCount{0};
     };
 }

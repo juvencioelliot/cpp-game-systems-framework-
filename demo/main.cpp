@@ -1,7 +1,9 @@
-#include "GameCore/Components/AttackIntentComponent.h"
-#include "GameCore/Components/HealthComponent.h"
+#include "CombatGameplay.h"
+
 #include "GameCore/Components/MoveIntentComponent.h"
+#include "GameCore/Components/NameComponent.h"
 #include "GameCore/Components/PositionComponent.h"
+#include "GameCore/Components/RenderableComponent.h"
 #include "GameCore/Core/Application.h"
 #include "GameCore/Core/AssetLoaders.h"
 #include "GameCore/Core/Entity.h"
@@ -11,8 +13,6 @@
 #include "GameCore/Core/SceneManager.h"
 #include "GameCore/Core/System.h"
 #include "GameCore/Core/World.h"
-#include "GameCore/Systems/AttackIntentSystem.h"
-#include "GameCore/Systems/CombatEvents.h"
 #include "GameCore/Systems/MovementSystem.h"
 #include "GameCore/Systems/RenderSystem.h"
 
@@ -81,12 +81,12 @@ namespace
         {
             using namespace GameCore;
 
-            m_logListener = world().events().subscribe<Systems::CombatMessageEvent>(
-                [this](const Systems::CombatMessageEvent& event) {
+            m_logListener = world().events().subscribe<CombatDemo::CombatMessageEvent>(
+                [this](const CombatDemo::CombatMessageEvent& event) {
                     addLog(event.message);
                 });
-            m_defeatListener = world().events().subscribe<Systems::EntityDefeatedEvent>(
-                [this](const Systems::EntityDefeatedEvent& event) {
+            m_defeatListener = world().events().subscribe<CombatDemo::EntityDefeatedEvent>(
+                [this](const CombatDemo::EntityDefeatedEvent& event) {
                     if (event.entity == m_enemy)
                     {
                         addLog("Player wins! Close the window or press Escape to exit.");
@@ -110,10 +110,14 @@ namespace
 
             m_player = entities[0];
             m_enemy = entities[1];
+            world().addComponent(m_player, Components::NameComponent{"Player"});
             world().addComponent(m_player, Components::MoveIntentComponent{});
-            world().addComponent(m_player, Components::AttackIntentComponent{});
+            world().addComponent(m_player, Components::RenderableComponent{'P', 0, true});
+            world().addComponent(m_player, CombatDemo::AttackIntentComponent{});
+            world().addComponent(m_enemy, Components::NameComponent{"Enemy"});
             world().addComponent(m_enemy, Components::MoveIntentComponent{});
-            world().addComponent(m_enemy, Components::AttackIntentComponent{});
+            world().addComponent(m_enemy, Components::RenderableComponent{'E', 0, true});
+            world().addComponent(m_enemy, CombatDemo::AttackIntentComponent{});
 
             systems().addSystem<Systems::MovementSystem>(
                 Core::SystemOrder{Core::SystemPhase::Simulation, 0},
@@ -121,26 +125,29 @@ namespace
                 ArenaMinY,
                 ArenaMaxX,
                 ArenaMaxY);
-            systems().addSystem<Systems::AttackIntentSystem>(
+            systems().addSystem<CombatDemo::AttackIntentSystem>(
                 Core::SystemOrder{Core::SystemPhase::Simulation, 10});
-
-            std::vector<Systems::RenderEntityLabel> renderEntities{
-                Systems::RenderEntityLabel{m_player, "Player", 'P'},
-                Systems::RenderEntityLabel{m_enemy, "Enemy", 'E'},
-            };
 
             m_renderSystem = &systems().addSystem<Systems::RenderSystem>(
                 Core::SystemOrder{Core::SystemPhase::Render, 0},
-                createDemoRenderBackend(),
-                std::move(renderEntities));
+                createDemoRenderBackend());
 
             addLog("Reach the enemy and press Space or Enter to attack.");
         }
 
-        void onUpdate(const GameCore::Core::FrameContext&) override
+        void onBeforeSystems(const GameCore::Core::FrameContext&) override
         {
             processInput();
 
+            if (!m_combatFinished)
+            {
+                writePlayerIntent();
+                writeEnemyIntent();
+            }
+        }
+
+        void onAfterSystems(const GameCore::Core::FrameContext&) override
+        {
             for (const auto& message : m_recentLog)
             {
                 std::cout << "  " << message << '\n';
@@ -152,25 +159,19 @@ namespace
                 stopApplication();
                 return;
             }
-
-            if (!m_combatFinished)
-            {
-                writePlayerIntent();
-                writeEnemyIntent();
-            }
         }
 
         void onShutdown() override
         {
             if (m_logListener != 0)
             {
-                world().events().unsubscribe<GameCore::Systems::CombatMessageEvent>(m_logListener);
+                world().events().unsubscribe<CombatDemo::CombatMessageEvent>(m_logListener);
                 m_logListener = 0;
             }
 
             if (m_defeatListener != 0)
             {
-                world().events().unsubscribe<GameCore::Systems::EntityDefeatedEvent>(m_defeatListener);
+                world().events().unsubscribe<CombatDemo::EntityDefeatedEvent>(m_defeatListener);
                 m_defeatListener = 0;
             }
         }
@@ -185,9 +186,12 @@ namespace
         {
             if (auto* app = application())
             {
+                GameCore::Core::PrefabComponentRegistry registry;
+                CombatDemo::registerCombatPrefabComponents(registry);
                 return GameCore::Core::AssetLoaders::loadKeyValuePrefab(app->resources(),
                                                                         "demo/combat-prefab",
-                                                                        assetPath("combat_demo.prefab"));
+                                                                        assetPath("combat_demo.prefab"),
+                                                                        registry);
             }
 
             throw std::runtime_error("CombatDemoScene requires an application context.");
@@ -225,7 +229,7 @@ namespace
 
             auto* app = application();
             auto* moveIntent = world().getComponent<GameCore::Components::MoveIntentComponent>(m_player);
-            auto* attackIntent = world().getComponent<GameCore::Components::AttackIntentComponent>(m_player);
+            auto* attackIntent = world().getComponent<CombatDemo::AttackIntentComponent>(m_player);
             auto* playerPosition = world().getComponent<GameCore::Components::PositionComponent>(m_player);
             auto* enemyPosition = world().getComponent<GameCore::Components::PositionComponent>(m_enemy);
             if (app == nullptr || moveIntent == nullptr || attackIntent == nullptr ||
@@ -266,7 +270,7 @@ namespace
                 moveIntent->dy = dy;
             }
 
-            if (app->input().wasPressed("Attack"))
+            if (app->input().wasPressed("PrimaryAction"))
             {
                 if (areAdjacent(*playerPosition, *enemyPosition))
                 {
@@ -294,7 +298,7 @@ namespace
             m_enemyDecisionFrame = 0;
 
             auto* moveIntent = world().getComponent<GameCore::Components::MoveIntentComponent>(m_enemy);
-            auto* attackIntent = world().getComponent<GameCore::Components::AttackIntentComponent>(m_enemy);
+            auto* attackIntent = world().getComponent<CombatDemo::AttackIntentComponent>(m_enemy);
             auto* enemyPosition = world().getComponent<GameCore::Components::PositionComponent>(m_enemy);
             auto* playerPosition = world().getComponent<GameCore::Components::PositionComponent>(m_player);
             if (moveIntent == nullptr || attackIntent == nullptr ||
