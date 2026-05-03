@@ -6,6 +6,7 @@
 #include "GameCore/Core/EventBus.h"
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <typeindex>
@@ -60,9 +61,51 @@ namespace GameCore::Core
             }
         }
 
+        template <typename Component>
+        void deferAddComponent(EntityID entity, const Component& component)
+        {
+            if (!m_entities.isAlive(entity))
+            {
+                return;
+            }
+
+            m_deferredComponentMutations.push_back(
+                [entity, component](World& world) {
+                    if (world.isAlive(entity))
+                    {
+                        world.addComponent(entity, component);
+                    }
+                });
+        }
+
+        template <typename Component>
+        void deferRemoveComponent(EntityID entity)
+        {
+            m_deferredComponentMutations.push_back(
+                [entity](World& world) {
+                    world.removeComponent<Component>(entity);
+                });
+        }
+
+        void flushDeferredComponentMutations()
+        {
+            auto mutations = std::move(m_deferredComponentMutations);
+            m_deferredComponentMutations.clear();
+
+            for (auto& mutation : mutations)
+            {
+                mutation(*this);
+            }
+        }
+
         [[nodiscard]] std::size_t deferredDestroyCount() const
         {
             return m_deferredDestroyEntities.size();
+        }
+
+        [[nodiscard]] std::size_t deferredComponentMutationCount() const
+        {
+            return m_deferredComponentMutations.size();
         }
 
         [[nodiscard]] bool isAlive(EntityID entity) const
@@ -98,7 +141,11 @@ namespace GameCore::Core
         template <typename Component>
         void removeComponent(EntityID entity)
         {
-            storage<Component>().remove(entity);
+            auto* componentStorage = findStorage<Component>();
+            if (componentStorage != nullptr)
+            {
+                componentStorage->remove(entity);
+            }
         }
 
         template <typename Component>
@@ -253,6 +300,7 @@ namespace GameCore::Core
         EntityManager m_entities;
         EventBus m_events;
         std::unordered_map<std::type_index, std::unique_ptr<IComponentStorage>> m_componentStorages;
+        std::vector<std::function<void(World&)>> m_deferredComponentMutations;
         std::vector<EntityID> m_deferredDestroyEntities;
     };
 }

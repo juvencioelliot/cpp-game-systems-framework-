@@ -166,7 +166,7 @@ namespace CombatDemo
 
         for (const auto entity : defeatedEntities)
         {
-            world.destroyEntity(entity);
+            world.deferDestroyEntity(entity);
         }
     }
 

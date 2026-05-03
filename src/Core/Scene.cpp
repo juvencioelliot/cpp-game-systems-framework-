@@ -22,6 +22,7 @@ namespace GameCore::Core
 
         onBeforeSystems(context);
         m_systems.update(m_world, context);
+        m_world.flushDeferredComponentMutations();
         m_world.flushDeferredDestruction();
         onAfterSystems(context);
     }

@@ -27,6 +27,7 @@ add_library(GameCoreCPP
     src/Core/Scene.cpp
     src/Core/SceneManager.cpp
     src/Core/SystemScheduler.cpp
+    src/Core/Time.cpp
     src/Systems/MovementSystem.cpp
     src/Systems/RenderSystem.cpp
     src/Systems/TransformSystem.cpp
@@ -84,9 +85,9 @@ endif()
 
 enable_testing()
 
-function(add_gamecore_test target source)
+function(add_gamecore_test target)
     add_executable(${target}
-        ${source}
+        ${ARGN}
     )
 
     target_link_libraries(${target}
@@ -99,3 +100,12 @@ endfunction()
 
 add_gamecore_test(GameCoreBasicTests tests/basic_tests.cpp)
 add_gamecore_test(GameCoreWorldTests tests/world_tests.cpp)
+add_gamecore_test(GameCoreCombatGameplayTests
+    tests/combat_gameplay_tests.cpp
+    demo/CombatGameplay.cpp
+)
+
+target_include_directories(GameCoreCombatGameplayTests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/demo
+)
