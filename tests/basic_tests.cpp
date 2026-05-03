@@ -24,6 +24,7 @@
 #include "GameCore/Systems/RenderSystem.h"
 #include "GameCore/Systems/TransformSystem.h"
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <filesystem>
@@ -202,6 +203,30 @@ namespace
         bool m_wasAliveDuringUpdate{false};
     };
 
+    class DeferredComponentMutationSystem final : public GameCore::Core::ISystem
+    {
+    public:
+        explicit DeferredComponentMutationSystem(GameCore::Core::EntityID entity)
+            : m_entity(entity)
+        {
+        }
+
+        void update(GameCore::Core::World& world, const GameCore::Core::FrameContext&) override
+        {
+            world.deferAddComponent(m_entity, TestDeltaComponent{9});
+            m_hadComponentDuringUpdate = world.hasComponent<TestDeltaComponent>(m_entity);
+        }
+
+        [[nodiscard]] bool hadComponentDuringUpdate() const
+        {
+            return m_hadComponentDuringUpdate;
+        }
+
+    private:
+        GameCore::Core::EntityID m_entity{GameCore::Core::InvalidEntity};
+        bool m_hadComponentDuringUpdate{false};
+    };
+
     class LifecycleScene final : public GameCore::Core::Scene
     {
     public:
@@ -263,6 +288,32 @@ namespace
 
     private:
         std::vector<int>& m_order;
+    };
+
+    class DeferredMutationObservedScene final : public GameCore::Core::Scene
+    {
+    public:
+        [[nodiscard]] bool hadComponentAfterSystems() const
+        {
+            return m_hadComponentAfterSystems;
+        }
+
+    protected:
+        void onInitialize() override
+        {
+            m_entity = world().createEntity();
+            world().addComponent(m_entity, TestValueComponent{1, 1});
+            systems().addSystem<DeferredComponentMutationSystem>(m_entity);
+        }
+
+        void onAfterSystems(const GameCore::Core::FrameContext&) override
+        {
+            m_hadComponentAfterSystems = world().hasComponent<TestDeltaComponent>(m_entity);
+        }
+
+    private:
+        GameCore::Core::EntityID m_entity{GameCore::Core::InvalidEntity};
+        bool m_hadComponentAfterSystems{false};
     };
 
     class BeforeSystemsMoveIntentScene final : public GameCore::Core::Scene
@@ -328,6 +379,49 @@ namespace
         GameCore::Core::Application& m_application;
         int m_updateCount{0};
         std::uint64_t m_lastFrameIndex{0};
+    };
+
+    class ContextRecordingScene final : public GameCore::Core::Scene
+    {
+    public:
+        [[nodiscard]] const std::vector<GameCore::Core::FrameContext>& contexts() const
+        {
+            return m_contexts;
+        }
+
+    protected:
+        void onUpdate(const GameCore::Core::FrameContext& context) override
+        {
+            m_contexts.push_back(context);
+        }
+
+    private:
+        std::vector<GameCore::Core::FrameContext> m_contexts;
+    };
+
+    class SequenceClock final : public GameCore::Core::IClock
+    {
+    public:
+        explicit SequenceClock(std::vector<double> times)
+            : m_times(std::move(times))
+        {
+        }
+
+        [[nodiscard]] double nowSeconds() const override
+        {
+            if (m_times.empty())
+            {
+                return 0.0;
+            }
+
+            const auto index = std::min(m_nextTimeIndex, m_times.size() - 1);
+            ++m_nextTimeIndex;
+            return m_times[index];
+        }
+
+    private:
+        std::vector<double> m_times;
+        mutable std::size_t m_nextTimeIndex{0};
     };
 
     class ShutdownObservedScene final : public GameCore::Core::Scene
@@ -682,6 +776,75 @@ namespace
 
         assert(!world.isAlive(entity));
         assert(world.deferredDestroyCount() == 0);
+    }
+
+    void testWorldFlushesDeferredComponentAddAndRemove()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID entity = world.createEntity();
+        world.addComponent(entity, TestValueComponent{10, 10});
+
+        world.deferAddComponent(entity, TestDeltaComponent{4});
+        world.deferRemoveComponent<TestValueComponent>(entity);
+
+        assert(world.deferredComponentMutationCount() == 2);
+        assert(!world.hasComponent<TestDeltaComponent>(entity));
+        assert(world.hasComponent<TestValueComponent>(entity));
+
+        world.flushDeferredComponentMutations();
+
+        assert(world.deferredComponentMutationCount() == 0);
+        assert(world.hasComponent<TestDeltaComponent>(entity));
+        assert(world.getComponent<TestDeltaComponent>(entity)->value == 4);
+        assert(!world.hasComponent<TestValueComponent>(entity));
+    }
+
+    void testWorldDeferredComponentAddSkipsDestroyedEntities()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID entity = world.createEntity();
+
+        world.deferAddComponent(entity, TestDeltaComponent{8});
+        world.destroyEntity(entity);
+        world.flushDeferredComponentMutations();
+
+        assert(!world.isAlive(entity));
+        assert(!world.hasComponent<TestDeltaComponent>(entity));
+    }
+
+    void testWorldDeferredComponentMutationIsSafeDuringIteration()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID first = world.createEntity();
+        const Core::EntityID second = world.createEntity();
+        world.addComponent(first, TestValueComponent{1, 1});
+        world.addComponent(second, TestValueComponent{2, 2});
+
+        std::vector<Core::EntityID> visited;
+        world.each<TestValueComponent>(
+            [&world, &visited](Core::EntityID entity, TestValueComponent&) {
+                visited.push_back(entity);
+                world.deferAddComponent(entity, TestDeltaComponent{3});
+                world.deferRemoveComponent<TestValueComponent>(entity);
+            });
+
+        assert(visited.size() == 2);
+        assert(world.deferredComponentMutationCount() == 4);
+        assert(world.hasComponent<TestValueComponent>(first));
+        assert(!world.hasComponent<TestDeltaComponent>(first));
+
+        world.flushDeferredComponentMutations();
+
+        assert(!world.hasComponent<TestValueComponent>(first));
+        assert(!world.hasComponent<TestValueComponent>(second));
+        assert(world.hasComponent<TestDeltaComponent>(first));
+        assert(world.hasComponent<TestDeltaComponent>(second));
     }
 
     void testWorldEachVisitsEntitiesWithRequestedComponents()
@@ -1202,6 +1365,16 @@ namespace
         assert(scene.world().getComponent<TestValueComponent>(entity) == nullptr);
     }
 
+    void testSceneFlushesDeferredComponentMutationsAfterSystems()
+    {
+        DeferredMutationObservedScene scene;
+
+        scene.update(GameCore::Core::FrameContext{});
+
+        assert(scene.hadComponentAfterSystems());
+        assert(scene.world().deferredComponentMutationCount() == 0);
+    }
+
     void testSceneShutdownClearsRuntimeOwnedSystemsAndEvents()
     {
         using namespace GameCore;
@@ -1287,6 +1460,80 @@ namespace
         assert(application.totalSeconds() == 1.0F);
         assert(sceneView->initializeCount() == 1);
         assert(sceneView->updateCount() == 2);
+    }
+
+    void testApplicationRunAccumulatesFixedStepsFromClock()
+    {
+        using namespace GameCore;
+
+        Core::Application application;
+        SequenceClock clock({0.0, 0.25});
+        auto scene = std::make_unique<ContextRecordingScene>();
+        auto* sceneView = scene.get();
+
+        application.setScene(std::move(scene));
+        application.run(Core::ApplicationRunOptions{
+            0.1F,
+            2,
+            false,
+            &clock,
+        });
+
+        assert(application.frameIndex() == 2);
+        assert(application.fixedFrameIndex() == 2);
+        assert(sceneView->contexts().size() == 2);
+        assert(sceneView->contexts()[0].deltaSeconds == 0.1F);
+        assert(sceneView->contexts()[0].frameIndex == 0);
+        assert(sceneView->contexts()[0].fixedFrameIndex == 0);
+        assert(sceneView->contexts()[1].frameIndex == 1);
+        assert(sceneView->contexts()[1].fixedFrameIndex == 1);
+    }
+
+    void testApplicationRunLimitsFixedStepCatchUpPerLoop()
+    {
+        using namespace GameCore;
+
+        Core::Application application;
+        SequenceClock clock({0.0, 0.35, 0.35});
+        auto scene = std::make_unique<LifecycleScene>();
+        auto* sceneView = scene.get();
+
+        application.setScene(std::move(scene));
+        application.run(Core::ApplicationRunOptions{
+            0.1F,
+            3,
+            false,
+            &clock,
+            2,
+        });
+
+        assert(application.frameIndex() == 3);
+        assert(sceneView->updateCount() == 3);
+    }
+
+    void testApplicationPauseStopsRunButAllowsManualStep()
+    {
+        using namespace GameCore;
+
+        Core::Application application;
+        auto scene = std::make_unique<LifecycleScene>();
+        auto* sceneView = scene.get();
+
+        application.setScene(std::move(scene));
+        application.setPaused(true);
+        application.runFrames(3, 0.5F);
+
+        assert(application.isPaused());
+        assert(application.frameIndex() == 0);
+        assert(sceneView->updateCount() == 0);
+
+        const bool stepped = application.stepFrame(0.5F);
+
+        assert(stepped);
+        assert(application.frameIndex() == 1);
+        assert(application.fixedFrameIndex() == 1);
+        assert(application.totalSeconds() == 0.5F);
+        assert(sceneView->updateCount() == 1);
     }
 
     void testApplicationRunCanBeStoppedByScene()
@@ -2154,6 +2401,9 @@ int main()
     testWorldRecycledEntityWrapsGenerationSafely();
     testWorldFlushesDeferredDestruction();
     testWorldDeduplicatesDeferredDestruction();
+    testWorldFlushesDeferredComponentAddAndRemove();
+    testWorldDeferredComponentAddSkipsDestroyedEntities();
+    testWorldDeferredComponentMutationIsSafeDuringIteration();
     testWorldEachVisitsEntitiesWithRequestedComponents();
     testWorldEachSupportsConstIteration();
     testSystemSchedulerRunsSystemsInOrder();
@@ -2176,11 +2426,15 @@ int main()
     testSceneRunsBeforeSystemsAndAfterSystemsHooksInOrder();
     testSceneBeforeSystemsIntentIsConsumedInSameFrame();
     testSceneFlushesDeferredDestructionAfterSystems();
+    testSceneFlushesDeferredComponentMutationsAfterSystems();
     testSceneShutdownClearsRuntimeOwnedSystemsAndEvents();
     testApplicationRunsActiveSceneForRequestedFrames();
     testApplicationRunWithoutSceneDoesNothing();
     testApplicationStopEndsFrameLoop();
     testApplicationRunUsesOptionsAndMaxFrames();
+    testApplicationRunAccumulatesFixedStepsFromClock();
+    testApplicationRunLimitsFixedStepCatchUpPerLoop();
+    testApplicationPauseStopsRunButAllowsManualStep();
     testApplicationRunCanBeStoppedByScene();
     testApplicationShutsDownPreviousSceneWhenReplacing();
     testApplicationCanClearActiveScene();

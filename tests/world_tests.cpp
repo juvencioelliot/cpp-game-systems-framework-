@@ -81,6 +81,28 @@ namespace
 
         assert(total == 9);
     }
+
+    void testDeferredComponentMutationFlushesAtBoundary()
+    {
+        using namespace GameCore;
+
+        Core::World world;
+        const Core::EntityID entity = world.createEntity();
+        world.addComponent(entity, TestValueComponent{10, 10});
+
+        world.deferAddComponent(entity, TestDeltaComponent{5});
+        world.deferRemoveComponent<TestValueComponent>(entity);
+
+        assert(world.deferredComponentMutationCount() == 2);
+        assert(world.hasComponent<TestValueComponent>(entity));
+        assert(!world.hasComponent<TestDeltaComponent>(entity));
+
+        world.flushDeferredComponentMutations();
+
+        assert(world.deferredComponentMutationCount() == 0);
+        assert(!world.hasComponent<TestValueComponent>(entity));
+        assert(world.hasComponent<TestDeltaComponent>(entity));
+    }
 }
 
 int main()
@@ -88,5 +110,6 @@ int main()
     testDestroyRemovesComponents();
     testEachVisitsMatchingLiveEntities();
     testEachSupportsConstIteration();
+    testDeferredComponentMutationFlushesAtBoundary();
     return 0;
 }

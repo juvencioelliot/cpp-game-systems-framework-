@@ -40,7 +40,7 @@ namespace
     constexpr int ArenaMinY = 0;
     constexpr int ArenaMaxX = 27;
     constexpr int ArenaMaxY = 6;
-    constexpr int EnemyDecisionInterval = 4;
+    constexpr float EnemyDecisionIntervalSeconds = 0.48F;
 
     std::unique_ptr<GameCore::Systems::IRenderBackend> createDemoRenderBackend()
     {
@@ -87,6 +87,8 @@ namespace
                 });
             m_defeatListener = world().events().subscribe<CombatDemo::EntityDefeatedEvent>(
                 [this](const CombatDemo::EntityDefeatedEvent& event) {
+                    world().deferRemoveComponent<GameCore::Components::RenderableComponent>(event.entity);
+
                     if (event.entity == m_enemy)
                     {
                         addLog("Player wins! Close the window or press Escape to exit.");
@@ -135,14 +137,14 @@ namespace
             addLog("Reach the enemy and press Space or Enter to attack.");
         }
 
-        void onBeforeSystems(const GameCore::Core::FrameContext&) override
+        void onBeforeSystems(const GameCore::Core::FrameContext& context) override
         {
             processInput();
 
             if (!m_combatFinished)
             {
                 writePlayerIntent();
-                writeEnemyIntent();
+                writeEnemyIntent(context.deltaSeconds);
             }
         }
 
@@ -283,19 +285,19 @@ namespace
             }
         }
 
-        void writeEnemyIntent()
+        void writeEnemyIntent(const float deltaSeconds)
         {
             if (!world().isAlive(m_enemy) || !world().isAlive(m_player))
             {
                 return;
             }
 
-            ++m_enemyDecisionFrame;
-            if (m_enemyDecisionFrame < EnemyDecisionInterval)
+            m_enemyDecisionSeconds += deltaSeconds;
+            if (m_enemyDecisionSeconds + 0.000001F < EnemyDecisionIntervalSeconds)
             {
                 return;
             }
-            m_enemyDecisionFrame = 0;
+            m_enemyDecisionSeconds = 0.0F;
 
             auto* moveIntent = world().getComponent<GameCore::Components::MoveIntentComponent>(m_enemy);
             auto* attackIntent = world().getComponent<CombatDemo::AttackIntentComponent>(m_enemy);
@@ -347,7 +349,7 @@ namespace
         GameCore::Core::EventBus::ListenerID m_defeatListener{0};
         std::vector<std::string> m_recentLog;
         GameCore::Systems::RenderSystem* m_renderSystem{nullptr};
-        int m_enemyDecisionFrame{0};
+        float m_enemyDecisionSeconds{0.0F};
         bool m_combatFinished{false};
 #if GAMECORE_HAS_SDL2
         GameCore::Core::SdlInputBackend m_input;

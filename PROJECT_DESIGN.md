@@ -63,6 +63,9 @@ This is not meant to compete with Unreal Engine or Unity. It is a learning and p
 - `SystemScheduler` with explicit phases and priorities.
 - Scene frame sequencing with before-systems and after-systems hooks.
 - `Application::runFrames(...)` for deterministic tests and `Application::run(...)` for runtime loops.
+- `IClock` / `SteadyClock` timing boundary for runtime and deterministic tests.
+- Fixed-step accumulation in `Application::run(...)` with a configurable catch-up limit.
+- Pause state and explicit single-frame stepping through `Application`.
 - Scene lifecycle management through `Scene` and `SceneManager`.
 - Backend-agnostic `InputManager` action state tracking.
 - `ResourceManager` with typed caching, reload support, metadata, and load/reload events.
@@ -84,6 +87,7 @@ This is not meant to compete with Unreal Engine or Unity. It is a learning and p
 - Generation wraparound protection inside the encoded entity handle range.
 - Deferred entity destruction flushed after scheduled systems.
 - Deferred destruction request deduplication.
+- Deferred component add/remove commands flushed at the scene update boundary.
 - Combat-specific health, attack, attack intent, and combat events moved into the demo gameplay layer.
 - Playable combat demo that loads prefab data, accepts input, runs scheduled systems, publishes events, and renders live frames.
 - Optional runtime benchmark target through `GAMECORE_BUILD_BENCHMARKS`.
@@ -91,8 +95,8 @@ This is not meant to compete with Unreal Engine or Unity. It is a learning and p
 
 ### Left To Do
 
-- Stronger fixed-step time model with accumulation, pause state, and deterministic test hooks.
-- Broader deferred mutation command support beyond entity destruction.
+- Broader timing features such as interpolation alpha, variable render callbacks, and richer profiling hooks.
+- Broader deferred mutation command support beyond component add/remove and entity destruction.
 - Richer render components and draw-command model for sprites, text, cameras, and future 3D paths.
 - Render-frame builder optimization; the current benchmark identifies draw-frame construction as the main hotspot.
 - Richer AI and gameplay rules beyond the first chase-and-attack prototype.
@@ -403,16 +407,16 @@ The demo is now interactive, so the next session should harden the gameplay/runt
 
 Current state:
 
-- `Application::run(...)` uses a fixed delta and optional sleep.
+- `Application::run(...)` supports fixed-step accumulation with optional clock injection.
 - `FrameContext` carries delta time, total elapsed time, frame index, and fixed-frame index.
 - `SystemScheduler` has phases and priorities.
 - Scene hooks provide explicit before-systems and after-systems phases.
-- There is no fixed-step accumulator, pause state, or manual-step control yet.
+- `Application` supports pause state and explicit single-frame stepping.
 
 Next work:
 
-- Add a `Clock` or `Time` layer suitable for deterministic tests.
-- Add fixed-step accumulation, pause/manual stepping, and tests.
+- Add interpolation data for render systems that need to blend between fixed updates.
+- Add optional variable-rate render/update callbacks if the renderer grows beyond fixed simulation frames.
 - Keep `runFrames(...)` or equivalent manual stepping for tests.
 
 Goal:
@@ -468,11 +472,12 @@ Current state:
 - `World::each<T...>()` supports basic component-set iteration.
 - Entity IDs are generation-aware.
 - `World::deferDestroyEntity(...)` allows systems to queue destruction safely during update.
+- `World::deferAddComponent(...)` and `World::deferRemoveComponent(...)` allow systems to queue component mutations safely during update.
 
 Next work:
 
 - Add safer component access patterns.
-- Add deferred component add/remove command support.
+- Add broader deferred commands for entity creation, event emission policies, or explicit command buffers if systems need them.
 - Add tests around invalid entities, destroyed entities, component removal, and iteration safety.
 
 Goal:
@@ -599,18 +604,17 @@ Goal:
 
 For the next coding session, the best order is:
 
-1. Add fixed-step accumulation, pause/manual stepping, and tests.
-2. Add deferred component add/remove command support.
-3. Add camera and sprite/render components on top of the current renderable path.
-4. Add scene description assets that can create entities, components, and system setup.
+1. Add camera and sprite/render components on top of the current renderable path.
+2. Add scene description assets that can create entities, components, and system setup.
+3. Add interpolation data or variable render callbacks if rendering needs smoother fixed-step output.
+4. Add broader command-buffer support only when a concrete system needs it.
 5. Then expand gameplay rules and renderer draw commands.
 
 If time is short, prioritize:
 
-1. `Clock` / `Time`.
-2. Fixed-step simulation.
-3. Pause/manual stepping.
-4. Deferred component mutation.
+1. Camera and sprite render data.
+2. Scene description assets.
+3. Render interpolation only if the demo needs smoother visual output.
 
 ---
 

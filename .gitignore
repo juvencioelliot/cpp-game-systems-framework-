@@ -1,3 +1,27 @@
+# OS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor and IDE files
+.vscode/
+.idea/
+.vs/
+*.code-workspace
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
 # Prerequisites
 *.d
 
@@ -38,11 +62,29 @@
 *.exe
 *.out
 *.app
+*.run
 
 # Build directories
 build/
 Build/
 build-*/
+cmake-build-*/
+out/
+bin/
+obj/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+x64/
+x86/
+Win32/
+
+# Visual Studio/MSBuild generated output
+*.dir/
+*.vcxproj.FileListAbsolute.txt
+*.lastbuildstate
+*.tlog/
 
 # CMake generated files
 CMakeFiles/
@@ -51,19 +93,46 @@ cmake_install.cmake
 Makefile
 install_manifest.txt
 compile_commands.json
+CMakeUserPresets.json
+CTestTestfile.cmake
+_deps/
+
+# Build system generated files
+.ninja_deps
+.ninja_log
+*.ninja
 
 # Temporary files
 *.tmp
 *.log
 *.bak
 *.swp
+*.swo
+*~
 
 # vcpkg
 vcpkg_installed/
 
+# Conan local outputs
+conanbuild/
+conanbuildinfo.*
+conaninfo.txt
+graph_info.json
+
 # debug information files
 *.dwo
+*.dSYM/
 
 # test output & cache
 Testing/
 .cache/
+
+# Coverage and profiling output
+*.gcda
+*.gcno
+*.gcov
+coverage/
+htmlcov/
+lcov.info
+*.profraw
+*.profdata
